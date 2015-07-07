@@ -1,0 +1,12 @@
+{
+   "initialconfig": "initial-config.sh",
+   "s3bucket" : "384u7fkfj-wintest",
+   "ec2" : [
+      {
+         "instancetype" : "t1.micro",
+         "name" : "debiantest1",
+         "ami" : "ami-baeda9d2",
+         "keyname" : "tor-cloud-servers"
+      }
+   ]
+}
