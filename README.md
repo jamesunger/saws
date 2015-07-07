@@ -1,0 +1,2 @@
+# saws
+Simple AWS tool
