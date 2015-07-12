@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"encoding/base64"
+	"regexp"
 )
 
 type Config struct {
@@ -26,16 +27,26 @@ type EC2 struct {
 	InstanceType string `json:instancetype`
 	AMI string `json:ami`
 	KeyName string `json:keyname`
+	SubnetID string `json:subnetid`
 }
 
-func getUserData(initialconfig string) string {
+func getUserData(initialconfig string, s3bucket string) string {
 	ic, err := ioutil.ReadFile(initialconfig)
 	if err != nil {
 		panic(err)
 	}
 
 
-	return base64.StdEncoding.EncodeToString([]byte(ic))
+	rxpid := regexp.MustCompile("SAWS_ACCESS_KEY")
+	rxpkey := regexp.MustCompile("SAWS_SECRET_KEY")
+	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
+	ic1 := rxpid.ReplaceAll(ic, []byte(os.Getenv("AWS_ACCESS_KEY_ID")))
+	ic2 := rxpkey.ReplaceAll(ic1, []byte(os.Getenv("AWS_SECRET_ACCESS_KEY")))
+	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
+
+
+	fmt.Println("ic3")
+	return base64.StdEncoding.EncodeToString([]byte(ic3))
 	
 }
 
@@ -86,6 +97,8 @@ func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
 	var max int64
 	min = 1
 	max = 1
+
+	subnet := ec2config.SubnetID	
 	params := &ec2.RunInstancesInput{
     		ImageID:      &ec2config.AMI,
     		InstanceType: &ec2config.InstanceType,
@@ -93,6 +106,7 @@ func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
 		MinCount: &min,
 		KeyName: &ec2config.KeyName,
 		UserData: &userdata,
+		SubnetID: &subnet,
 	}
 
 	rres, err := svc.RunInstances(params)
@@ -205,7 +219,7 @@ func Create(config Config) {
 
 		if !exists {
 			fmt.Println("No instance found, creating...")
-			userdata := getUserData(config.InitialConfig)
+			userdata := getUserData(config.InitialConfig,config.S3Bucket)
 			createInstance(svc, config.EC2[i], userdata)
 			
 		}
@@ -227,7 +241,7 @@ func Destroy(config Config) {
 			if *instances[k].State.Name == "terminated" {
 				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
-				fmt.Println("Instance will be terminated: ", *instances[k].PublicIPAddress)
+				fmt.Println("Instance will be terminated: ", *instances[k].InstanceID)
 				instanceids := []*string{ instances[k].InstanceID }
 				tii := ec2.TerminateInstancesInput { InstanceIDs: instanceids }
 				_,err := svc.TerminateInstances(&tii)
