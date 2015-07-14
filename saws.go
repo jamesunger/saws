@@ -28,6 +28,7 @@ type EC2 struct {
 	AMI string `json:ami`
 	KeyName string `json:keyname`
 	SubnetID string `json:subnetid`
+	SecurityGroupIDs []*string `json:securitygroupids`
 }
 
 func getUserData(initialconfig string, s3bucket string) string {
@@ -107,6 +108,7 @@ func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
 		KeyName: &ec2config.KeyName,
 		UserData: &userdata,
 		SubnetID: &subnet,
+		SecurityGroupIDs: ec2config.SecurityGroupIDs,
 	}
 
 	rres, err := svc.RunInstances(params)

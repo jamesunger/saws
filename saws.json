@@ -6,7 +6,8 @@
          "instancetype" : "t1.micro",
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
-         "keyname" : "tor-cloud-servers"
+         "keyname" : "tor-cloud-servers",
+	 "securitygroupids" : [ "sg-c26a2ca6" ]
       }
    ]
 }
