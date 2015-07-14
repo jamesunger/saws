@@ -38,11 +38,24 @@ func getUserData(initialconfig string, s3bucket string) string {
 	}
 
 
+
+	accid := os.Getenv("AWS_ACCESS_KEY_ID")
+	seck := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	if accid == "" {
+		panic("Error: need to set env var AWS_ACCESS_KEY_ID")
+	}
+
+	if seck == "" {
+		panic("Error: need to set env var AWS_SECRET_ACCESS_KEY")
+	}
+
+
 	rxpid := regexp.MustCompile("SAWS_ACCESS_KEY")
 	rxpkey := regexp.MustCompile("SAWS_SECRET_KEY")
 	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
-	ic1 := rxpid.ReplaceAll(ic, []byte(os.Getenv("AWS_ACCESS_KEY_ID")))
-	ic2 := rxpkey.ReplaceAll(ic1, []byte(os.Getenv("AWS_SECRET_ACCESS_KEY")))
+	ic1 := rxpid.ReplaceAll(ic, []byte(accid))
+	ic2 := rxpkey.ReplaceAll(ic1, []byte(seck))
 	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
 
 
@@ -194,6 +207,39 @@ func getInstancesByName(svc *ec2.EC2, tag string) []*ec2.Instance {
 
 	//fmt.Println(instances)
 	return instances
+
+}
+
+func Stat(config Config) {
+	
+	svc := ec2.New(nil)
+
+	for i := range config.EC2 {
+		fmt.Println(config.EC2[i].Name)
+		fmt.Println(config.EC2[i].InstanceType)
+
+		instances := getInstancesByName(svc,config.EC2[i].Name)
+
+
+		//exists := false
+		for k := range instances {
+			fmt.Println(*instances[k].InstanceID)	
+			userd := "userData"
+			diai := &ec2.DescribeInstanceAttributeInput{
+					Attribute: &userd,
+					InstanceID: instances[k].InstanceID,
+			}
+			dao,err := svc.DescribeInstanceAttribute(diai)
+			if err != nil {
+				fmt.Println(err)
+			}
+			data,_ := base64.StdEncoding.DecodeString(*dao.UserData.Value)
+			fmt.Println(string(data))
+			//fmt.Println(dao.UserData.Value)
+		}
+	}
+
+
 
 }
 
@@ -418,6 +464,8 @@ func main() {
 		Destroy(*config)
 	case action == "push":
 		Push(*config)
+	case action == "stat":
+		Stat(*config)
 	default:
 		fmt.Println("Unknown action given", action)
 	}
