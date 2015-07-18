@@ -12,7 +12,17 @@
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "securitygroups" : [ "ssh" ]
+	 "hasexternalip" : true,
+	 "securitygroups" : [ "default", "ssh" ]
+      },
+      {
+         "instancetype" : "t1.micro",
+         "name" : "debiantest2",
+         "ami" : "ami-baeda9d2",
+         "keyname" : "tor-cloud-servers",
+	 "securitygroups" : [ "default", "ssh" ]
       }
+
+
    ]
 }

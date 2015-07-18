@@ -42,6 +42,7 @@ type EC2 struct {
 	SubnetID string `json:subnetid`
 	SecurityGroupIDs []*string `json:securitygroupids`
 	SecurityGroups []string `json:securitygroups`
+	HasExternalIP bool `json:hasexternalip`
 }
 
 func getUserData(initialconfig string, s3bucket string) string {
@@ -72,7 +73,6 @@ func getUserData(initialconfig string, s3bucket string) string {
 	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
 
 
-	fmt.Println("ic3")
 	return base64.StdEncoding.EncodeToString([]byte(ic3))
 	
 }
@@ -184,6 +184,9 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 	} else {
 		fmt.Println("Created instance")
 		//fmt.Println(rres)
+
+		fmt.Println("Sleeping for a sec to give AWS some time ...")
+		time.Sleep(1*time.Second)
 		
 		keyname := "Name"
 		_, err := svc.CreateTags(&ec2.CreateTagsInput{
@@ -206,30 +209,31 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		}
 
 
-
-		vpcs := "vpc"
-		aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
-		if err != nil {
-			fmt.Println("Could not allocate addr:", err)
- 		}
-
-		fmt.Println(aao)
-
-
-		err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
-			aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+		fmt.Println("hasexternalip ", ec2config.HasExternalIP)
+		if ec2config.HasExternalIP {
+			vpcs := "vpc"
+			aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
 			if err != nil {
-				fmt.Println("Could not assign addr:", err)
+				fmt.Println("Could not allocate addr:", err)
  			}
 
-			fmt.Println(aai)
+			fmt.Println(aao)
+
+
+			err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
+				aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+				if err != nil {
+					fmt.Println("Could not assign addr:", err)
+ 				}
+
+				fmt.Println(aai)
+			}
+
 		}
-
-
 
 	}
 
@@ -418,29 +422,32 @@ func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
 
 	//secgroups := make([]*string,0)
 	secgroupids := make([]*string,0)
-	filters := make([]*ec2.Filter,0)
 	for i := range inst.SecurityGroups {
+		filters := make([]*ec2.Filter,0)
 		//secgroups = append(secgroups,&inst.SecurityGroups[i])
 
 		keyname := "group-name"
+		keyname2 := "vpc-id"
 		filter := ec2.Filter{
 			Name: &keyname, Values: []*string{ &inst.SecurityGroups[i] } }
+		filter2 := ec2.Filter{
+			Name: &keyname2, Values: []*string{ &config.VPCID } }
 		filters = append(filters,&filter)
-	}
+		filters = append(filters,&filter2)
 
+		fmt.Println("Filters ", filters)
 
-	
+		dsgi := &ec2.DescribeSecurityGroupsInput{ Filters: filters }
+		dsgo,err := c.DescribeSecurityGroups(dsgi)
+		if err != nil {
+			fmt.Println("Describe security groups failed.")
+			panic(err)
+		}
 
-	fmt.Println("Filters ", filters)
-	dsgi := &ec2.DescribeSecurityGroupsInput{ Filters: filters }
-	dsgo,err := c.DescribeSecurityGroups(dsgi)
-	if err != nil {
-		fmt.Println("Describe security groups failed.")
-		panic(err)
-	}
+		for i := range dsgo.SecurityGroups {
+			secgroupids = append(secgroupids,dsgo.SecurityGroups[i].GroupID)
+		}
 
-	for i := range dsgo.SecurityGroups {
-		secgroupids = append(secgroupids,dsgo.SecurityGroups[i].GroupID)
 	}
 
 
@@ -618,8 +625,6 @@ func Destroy(config *Config) {
 
 			}
 		}
-
-		
 	}
 
 }
@@ -736,7 +741,7 @@ func main() {
 		action     string
 	)
 	flag.StringVar(&configfile, "c", "saws.json", "Config file to use")
-	flag.StringVar(&action, "a", "pack", "Action, create/destroy/pack/push")
+	flag.StringVar(&action, "a", "pack", "Action, create/destroy/pack/push/stat")
 	flag.Parse()
 
 	config := parseConfig(configfile)
