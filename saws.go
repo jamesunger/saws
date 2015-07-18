@@ -14,12 +14,24 @@ import (
 	"path/filepath"
 	"encoding/base64"
 	"regexp"
+	"time"
+	"errors"
+	"strings"
 )
 
 type Config struct {
 	S3Bucket string `json:s3bucket`
 	EC2      []EC2  `json:ec2`
 	InitialConfig     string  `json:initialconfig`
+	VPC string `json:vpc`
+	VPCID string `json:vpcid`
+	SubnetID string `json:subnetid`
+	AllSecurityGroups []SecurityGroup `json:allsecuritygroups`
+}
+
+type SecurityGroup struct {
+	Name string `json:name`
+	TcpPort int64 `json:tcpport`
 }
 
 type EC2 struct {
@@ -29,6 +41,7 @@ type EC2 struct {
 	KeyName string `json:keyname`
 	SubnetID string `json:subnetid`
 	SecurityGroupIDs []*string `json:securitygroupids`
+	SecurityGroups []string `json:securitygroups`
 }
 
 func getUserData(initialconfig string, s3bucket string) string {
@@ -79,7 +92,7 @@ func parseConfig(configfile string) *Config {
 	return config
 }
 
-func uploadPackage(config Config) error {
+func uploadPackage(config *Config) error {
 	key := "package.zip"
 	uploadfile, err := os.Open(key)
 	if err != nil {
@@ -102,17 +115,56 @@ func uploadPackage(config Config) error {
 	return nil
 }
 
-func Push(config Config) {
+func Push(config *Config) {
 	uploadPackage(config)
 }
 
-func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
+func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
+	iids := []*string{ instanceid }
+	dii := &ec2.DescribeInstancesInput {
+		InstanceIDs: iids,
+	}
+
+	dio,err := svc.DescribeInstances(dii)
+	if err != nil {
+		panic(err)
+	}
+
+
+	fmt.Println(dio)
+	count := 0
+	for {
+		dio,err = svc.DescribeInstances(dii)
+		if err != nil {
+			panic(err)
+		}
+
+		if *dio.Reservations[0].Instances[0].State.Name != "pending" {
+			return nil
+		}
+
+		if count > 20 {
+			break
+		}
+
+		time.Sleep(2*time.Second)
+		count++
+		fmt.Println(dio)
+	}
+
+
+	return errors.New("Waited too long for EC2 to leave pending state.")
+
+}
+
+func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string) {
 	var min int64
 	var max int64
 	min = 1
 	max = 1
 
-	subnet := ec2config.SubnetID	
+	subnet := config.SubnetID
+	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, &ec2config)
 	params := &ec2.RunInstancesInput{
     		ImageID:      &ec2config.AMI,
     		InstanceType: &ec2config.InstanceType,
@@ -123,6 +175,7 @@ func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
 		SubnetID: &subnet,
 		SecurityGroupIDs: ec2config.SecurityGroupIDs,
 	}
+	fmt.Println("Create instance params:", params)
 
 	rres, err := svc.RunInstances(params)
 	if err != nil {
@@ -147,9 +200,36 @@ func createInstance(svc *ec2.EC2, ec2config EC2, userdata string) {
 
 		if err != nil {
 			fmt.Println("Could not create tags for instance ", rres.Instances[0].InstanceID)
+			fmt.Println(err)
 		} else {
 			fmt.Println("Created tag Name with value", ec2config.Name)
 		}
+
+
+
+		vpcs := "vpc"
+		aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
+		if err != nil {
+			fmt.Println("Could not allocate addr:", err)
+ 		}
+
+		fmt.Println(aao)
+
+
+		err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
+			aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+			if err != nil {
+				fmt.Println("Could not assign addr:", err)
+ 			}
+
+			fmt.Println(aai)
+		}
+
+
 
 	}
 
@@ -210,7 +290,7 @@ func getInstancesByName(svc *ec2.EC2, tag string) []*ec2.Instance {
 
 }
 
-func Stat(config Config) {
+func Stat(config *Config) {
 	
 	svc := ec2.New(nil)
 
@@ -224,6 +304,7 @@ func Stat(config Config) {
 		//exists := false
 		for k := range instances {
 			fmt.Println(*instances[k].InstanceID)	
+			fmt.Println(instances[k])
 			userd := "userData"
 			diai := &ec2.DescribeInstanceAttributeInput{
 					Attribute: &userd,
@@ -243,11 +324,248 @@ func Stat(config Config) {
 
 }
 
-func Create(config Config) {
+func getRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
+	drti := &ec2.DescribeRouteTablesInput{}
+	drto,err := svc.DescribeRouteTables(drti)
+	if err != nil {
+		panic(err)
+	}
+
+	for i := range drto.RouteTables {
+		if *drto.RouteTables[i].VPCID == *VPCID {
+			fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
+			return drto.RouteTables[i].RouteTableID,nil
+		}
+	}
+
+	return nil,errors.New(fmt.Sprintf("No route table found for vpc", *VPCID))
+
+}
+
+func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
+	cigi := &ec2.CreateInternetGatewayInput{}
+	cigo,err := svc.CreateInternetGateway(cigi)
+	if err != nil {
+		fmt.Println("Failed to create gateway.")
+		return err
+	}
+
+	fmt.Println("We have vpcid: " + *vpc.VPCID)
+	_,err = svc.AttachInternetGateway(&ec2.AttachInternetGatewayInput{InternetGatewayID: cigo.InternetGateway.InternetGatewayID, VPCID: vpc.VPCID})
+	if err != nil {
+		fmt.Println("Failed to attach gateway.")
+		return err
+	}
+	
+	defgtw := "0.0.0.0/0"
+	rtid,err := getRouteTableFromVPC(svc, vpc.VPCID)
+	if err != nil {
+		fmt.Println("Failed to get route table from VPC id.")
+		panic(err)
+	}
+	cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defgtw, GatewayID: cigo.InternetGateway.InternetGatewayID, RouteTableID: rtid }
+	cro,err := svc.CreateRoute(cri)
+	fmt.Println(cro)
+	if err != nil {
+		fmt.Println("Failed to create default route.")
+		return err
+	}
+
+	arti := &ec2.AssociateRouteTableInput{ RouteTableID: rtid, SubnetID: subid }
+	arto, err := svc.AssociateRouteTable(arti)
+	fmt.Println(arto)
+	if err != nil {
+		fmt.Println("Failed to associate subnet with route table.")
+		return err
+	}
+
+	return nil
+
+}
+
+func createSecurityGroups(c *ec2.EC2, config *Config) error {
+		for j := range config.AllSecurityGroups {
+			csgi := &ec2.CreateSecurityGroupInput{ GroupName: &config.AllSecurityGroups[j].Name, VPCID: &config.VPCID, Description: &config.AllSecurityGroups[j].Name }
+			csgo,err := c.CreateSecurityGroup(csgi)
+			fmt.Println(err)
+			if err != nil {
+				fmt.Println("Failed to create security group.")
+				fmt.Println(err)
+				if !strings.Contains(fmt.Sprintf("%s",err),"InvalidGroup.Duplicate") {
+					return err
+				}
+				continue
+			}
+
+			everywhere := "0.0.0.0/0"
+		 	proto := "tcp"
+			//var fromPort int64
+			//fromPort = -1
+			asgii := &ec2.AuthorizeSecurityGroupIngressInput{ CIDRIP: &everywhere, FromPort: &config.AllSecurityGroups[j].TcpPort, ToPort: &config.AllSecurityGroups[j].TcpPort, GroupID: csgo.GroupID, IPProtocol: &proto }
+			_,err = c.AuthorizeSecurityGroupIngress(asgii)
+			if err != nil {
+			}
+				fmt.Println("Failed to add rule to security group.")
+				return err
+		}
+
+	return nil
+
+}
+
+func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
+	
+
+	//secgroups := make([]*string,0)
+	secgroupids := make([]*string,0)
+	filters := make([]*ec2.Filter,0)
+	for i := range inst.SecurityGroups {
+		//secgroups = append(secgroups,&inst.SecurityGroups[i])
+
+		keyname := "group-name"
+		filter := ec2.Filter{
+			Name: &keyname, Values: []*string{ &inst.SecurityGroups[i] } }
+		filters = append(filters,&filter)
+	}
+
+
+	
+
+	fmt.Println("Filters ", filters)
+	dsgi := &ec2.DescribeSecurityGroupsInput{ Filters: filters }
+	dsgo,err := c.DescribeSecurityGroups(dsgi)
+	if err != nil {
+		fmt.Println("Describe security groups failed.")
+		panic(err)
+	}
+
+	for i := range dsgo.SecurityGroups {
+		secgroupids = append(secgroupids,dsgo.SecurityGroups[i].GroupID)
+	}
+
+
+	fmt.Println("Security Groups!", secgroupids)
+	return secgroupids
+
+}
+
+func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
+
+	dvi := &ec2.DescribeVPCsInput{}
+	dvo,err := c.DescribeVPCs(dvi)
+	if err != nil {
+		return err
+	}
+
+	
+	vpc := &ec2.VPC{}
+	vpcexists := false
+	for i := range dvo.VPCs {
+		if *dvo.VPCs[i].CIDRBlock == config.VPC {
+			vpc = dvo.VPCs[i]
+			vpcexists = true
+			config.VPCID = *dvo.VPCs[i].VPCID
+			fmt.Println("VPC already exists.")
+		}
+	}
+
+
+
+
+	if vpcexists {
+
+		err = createSecurityGroups(c, config)
+		if err != nil {
+			fmt.Println("Failed to create security groups.")
+			panic(err)
+		}
+
+		/*
+		sgids := getSecurityGroupIDs(c,config, BOOK
+		err = applySecurityGroups(c, config)
+		if err != nil {
+			fmt.Println("Failed to apply security groups.")
+			panic(err)
+		}
+		*/
+
+		dsi := &ec2.DescribeSubnetsInput{}
+		dso,err := c.DescribeSubnets(dsi)
+		if err != nil {
+			panic(err)
+		}
+
+		for i := range dso.Subnets {
+			if *dso.Subnets[i].CIDRBlock == config.VPC {
+				fmt.Println("Subnet for VPC already exists.")
+				config.SubnetID = *dso.Subnets[i].SubnetID
+				return nil
+			}
+		}
+
+		csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.VPC, VPCID: &config.VPCID}
+		cso,err := c.CreateSubnet(csi)
+		if err != nil {
+			fmt.Println("Create subnet failed")
+			return err
+		}
+		fmt.Println(cso)
+		config.SubnetID = *cso.Subnet.SubnetID
+
+		return createGateway(c, vpc, cso.Subnet.SubnetID)
+
+	}
+
+	cvi := &ec2.CreateVPCInput{ CIDRBlock: &config.VPC }
+	cvo, err := c.CreateVPC(cvi)
+	
+	if err != nil {
+		return err
+	}	
+	config.VPCID = *cvo.VPC.VPCID
+	fmt.Println("newly created vpid " + config.VPCID)
+
+	fmt.Println(cvo)
+	err = createSecurityGroups(c, config)
+	if err != nil {
+		fmt.Println("Failed to create security groups.")
+		panic(err)
+	}
+
+	/*
+	err = applySecurityGroups(c, config)
+	if err != nil {
+		fmt.Println("Failed to apply security groups.")
+		panic(err)
+	}
+	*/
+
+
+	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.VPC, VPCID: &config.VPCID }
+	cso,err := c.CreateSubnet(csi)
+	if err != nil {
+		return err
+	}
+	fmt.Println(cso)
+	config.SubnetID = *cso.Subnet.SubnetID
+
+	return createGateway(c, cvo.VPC, cso.Subnet.SubnetID)
+
+}
+
+func Create(config *Config) {
 	//fmt.Println("Create not implemented")
 
 	svc := ec2.New(nil)
 
+	err := verifyAndCreateVPC(svc,config)
+	if err != nil {
+		panic(err)
+	}
+
+
+
+	//fmt.Println("Creating with", config)
 	for i := range config.EC2 {
 		fmt.Println(config.EC2[i].Name)
 		fmt.Println(config.EC2[i].InstanceType)
@@ -259,7 +577,7 @@ func Create(config Config) {
 			if *instances[k].State.Name == "terminated" {
 				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
-				fmt.Println("Instance already exists: ", *instances[k].PublicIPAddress)
+				fmt.Println("Instance already exists: ", *instances[k].InstanceID)
 				exists = true
 			}
 		}
@@ -268,14 +586,14 @@ func Create(config Config) {
 		if !exists {
 			fmt.Println("No instance found, creating...")
 			userdata := getUserData(config.InitialConfig,config.S3Bucket)
-			createInstance(svc, config.EC2[i], userdata)
+			createInstance(svc, config, config.EC2[i], userdata)
 			
 		}
 
 	}
 }
 
-func Destroy(config Config) {
+func Destroy(config *Config) {
 	//fmt.Println("Destroy not implemented")
 	svc := ec2.New(nil)
 
@@ -459,13 +777,13 @@ func main() {
 	case action == "pack":
 		Pack()
 	case action == "create":
-		Create(*config)
+		Create(config)
 	case action == "destroy":
-		Destroy(*config)
+		Destroy(config)
 	case action == "push":
-		Push(*config)
+		Push(config)
 	case action == "stat":
-		Stat(*config)
+		Stat(config)
 	default:
 		fmt.Println("Unknown action given", action)
 	}

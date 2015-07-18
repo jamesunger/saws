@@ -1,13 +1,18 @@
 {
    "initialconfig": "initial-config.sh",
    "s3bucket" : "384u7fkfj-wintest",
+   "vpc" : "192.168.98.0/24",
+   "allsecuritygroups" : [ {
+			"name": "ssh",
+			"tcpport": 22
+			} ],
    "ec2" : [
       {
          "instancetype" : "t1.micro",
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "securitygroupids" : [ "sg-c26a2ca6" ]
+	 "securitygroups" : [ "ssh" ]
       }
    ]
 }
