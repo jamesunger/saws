@@ -25,8 +25,11 @@ type Config struct {
 	EC2      []EC2  `json:ec2`
 	InitialConfig     string  `json:initialconfig`
 	VPC string `json:vpc`
+	PrivateNet string `json:privatenet`
+	PublicNet string `json:publicnet`
 	VPCID string `json:vpcid`
-	SubnetID string `json:subnetid`
+	PrivateSubnetID string `json:privatesubnetid`
+	PublicSubnetID string `json:publicsubnetid`
 	AllSecurityGroups []SecurityGroup `json:allsecuritygroups`
 }
 
@@ -44,9 +47,10 @@ type EC2 struct {
 	SecurityGroupIDs []*string `json:securitygroupids`
 	SecurityGroups []string `json:securitygroups`
 	HasExternalIP bool `json:hasexternalip`
+	IsNat bool `json:isnat`
 }
 
-func getUserData(initialconfig string, s3bucket string, hostname string) string {
+func getUserData(initialconfig string, s3bucket string, hostname string, vpc string) string {
 	ic, err := ioutil.ReadFile(initialconfig)
 	if err != nil {
 		panic(err)
@@ -70,13 +74,15 @@ func getUserData(initialconfig string, s3bucket string, hostname string) string 
 	rxpkey := regexp.MustCompile("SAWS_SECRET_KEY")
 	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
 	rxphostname := regexp.MustCompile("SAWS_HOSTNAME")
+	rxpvpc := regexp.MustCompile("SAWS_VPC")
 	ic1 := rxpid.ReplaceAll(ic, []byte(accid))
 	ic2 := rxpkey.ReplaceAll(ic1, []byte(seck))
 	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
 	ic4 := rxphostname.ReplaceAll(ic3, []byte(hostname))
+	ic5 := rxpvpc.ReplaceAll(ic4, []byte(vpc))
 
 
-	return base64.StdEncoding.EncodeToString([]byte(ic4))
+	return base64.StdEncoding.EncodeToString([]byte(ic5))
 }
 
 func parseConfig(configfile string) *Config {
@@ -158,6 +164,46 @@ func Push(config *Config) {
 	uploadPackage(config)
 }
 
+func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
+	iids := []*string{ instanceid }
+	dii := &ec2.DescribeInstancesInput {
+		InstanceIDs: iids,
+	}
+
+	dio,err := svc.DescribeInstances(dii)
+	if err != nil {
+		panic(err)
+	}
+
+
+	fmt.Println(dio)
+	count := 0
+	for {
+		dio,err = svc.DescribeInstances(dii)
+		if err != nil {
+			panic(err)
+		}
+
+		if *dio.Reservations[0].Instances[0].State.Name != state {
+			return nil
+		}
+
+		if count > 20 {
+			break
+		}
+
+		time.Sleep(2*time.Second)
+		count++
+		//fmt.Println(dio)
+		fmt.Println("waiting...")
+	}
+
+
+	return errors.New(fmt.Sprintf("Waited too long for EC2 to leave %s state",state))
+
+
+}
+
 func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 	iids := []*string{ instanceid }
 	dii := &ec2.DescribeInstancesInput {
@@ -203,7 +249,15 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 	min = 1
 	max = 1
 
-	subnet := config.SubnetID
+
+
+	var subnet string
+	if ec2config.HasExternalIP {
+		subnet = config.PublicSubnetID
+	} else {
+		subnet = config.PrivateSubnetID
+	}
+
 	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, &ec2config)
 	params := &ec2.RunInstancesInput{
 		ImageID:      &ec2config.AMI,
@@ -226,7 +280,9 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		//fmt.Println(rres)
 
 		fmt.Println("Sleeping for a sec to give AWS some time ...")
-		time.Sleep(1*time.Second)
+
+
+	time.Sleep(1*time.Second)
 
 		keyname := "Name"
 		_, err := svc.CreateTags(&ec2.CreateTagsInput{
@@ -271,6 +327,35 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 				}
 
 				fmt.Println(aai)
+			}
+
+		}
+
+		fmt.Println("isnat", ec2config.IsNat)
+		if ec2config.IsNat {
+			bv := false
+			abv := &ec2.AttributeBooleanValue{ Value: &bv }
+			miai := &ec2.ModifyInstanceAttributeInput{ InstanceID: rres.Instances[0].InstanceID, SourceDestCheck: abv }
+			_,err := svc.ModifyInstanceAttribute(miai)
+			if err != nil {
+				fmt.Println("Failed to change sourcedestcheck", err)
+			}
+
+			routeid,err := getPrivateRouteTable(svc, &config.PrivateSubnetID, config.VPCID)
+			if err != nil {
+				routeid,err = createPrivateRouteTable(svc, config)
+			} else {
+				err = deleteDefaultRoute(svc,routeid)
+				if err != nil {
+					fmt.Println("Error deleting default route or default route existed", err)
+				}
+			}
+
+			defr := "0.0.0.0/0"
+			cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defr, InstanceID: rres.Instances[0].InstanceID, RouteTableID: routeid }
+			_,err = svc.CreateRoute(cri)
+			if err != nil {
+				fmt.Println("Error adding new default route to NAT node", err)
 			}
 
 		}
@@ -394,8 +479,19 @@ func Stat(config *Config) {
 
 }
 
-func getRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
-	drti := &ec2.DescribeRouteTablesInput{}
+func getMainRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
+
+	keyname := "association.main"
+	asbool := "true"
+	filters := make([]*ec2.Filter,0)
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ &asbool } }
+	filters = append(filters,&filter)
+
+	fmt.Println("Filters ", filters)
+
+
+	drti := &ec2.DescribeRouteTablesInput{ Filters: filters}
 	drto,err := svc.DescribeRouteTables(drti)
 	if err != nil {
 		panic(err)
@@ -408,8 +504,50 @@ func getRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
 		}
 	}
 
-	return nil,errors.New(fmt.Sprintf("No route table found for vpc", *VPCID))
+	return nil,errors.New(fmt.Sprintf("No main route table found for vpc", *VPCID))
 
+}
+
+
+
+func getPrivateRouteTable(svc *ec2.EC2, subnetid *string, VPCID string) (*string, error) {
+	keyname := "association.subnet-id"
+	filters := make([]*ec2.Filter,0)
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ subnetid } }
+	filters = append(filters,&filter)
+
+	fmt.Println("Filters ", filters)
+
+	drti := &ec2.DescribeRouteTablesInput{Filters: filters}
+	drto,err := svc.DescribeRouteTables(drti)
+	if err != nil {
+		panic(err)
+	}
+
+	for i := range drto.RouteTables {
+		if *drto.RouteTables[i].VPCID == VPCID {
+			fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
+			return drto.RouteTables[i].RouteTableID,nil
+		}
+	}
+
+	return nil,errors.New(fmt.Sprintf("No route table found for subnet", *subnetid))
+
+}
+
+
+
+
+func deleteDefaultRoute(svc *ec2.EC2, rtid *string) error {
+	defr := "0.0.0.0/0"
+	dri := &ec2.DeleteRouteInput{ DestinationCIDRBlock: &defr, RouteTableID: rtid}
+	_,err := svc.DeleteRoute(dri)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
@@ -427,13 +565,13 @@ func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
 		return err
 	}
 
-	defgtw := "0.0.0.0/0"
-	rtid,err := getRouteTableFromVPC(svc, vpc.VPCID)
+	defr := "0.0.0.0/0"
+	rtid,err := getMainRouteTableFromVPC(svc, vpc.VPCID)
 	if err != nil {
 		fmt.Println("Failed to get route table from VPC id.")
 		panic(err)
 	}
-	cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defgtw, GatewayID: cigo.InternetGateway.InternetGatewayID, RouteTableID: rtid }
+	cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defr, GatewayID: cigo.InternetGateway.InternetGatewayID, RouteTableID: rtid }
 	cro,err := svc.CreateRoute(cri)
 	fmt.Println(cro)
 	if err != nil {
@@ -480,6 +618,55 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 		}
 
 	return nil
+
+}
+
+func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.CreateSubnetOutput, error) {
+
+
+	useast1d := "us-east-1d"
+	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &useast1d }
+	cso1,err := svc.CreateSubnet(csi)
+	if err != nil {
+		fmt.Println("Create public subnet failed")
+		return nil,nil,err
+	}
+	fmt.Println(cso1)
+	config.PublicSubnetID = *cso1.Subnet.SubnetID
+
+	csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID}
+	cso2,err := svc.CreateSubnet(csi)
+	if err != nil {
+		fmt.Println("Create private subnet failed")
+		return nil,nil,err
+	}
+	fmt.Println(cso2)
+	config.PrivateSubnetID = *cso2.Subnet.SubnetID
+
+
+	return cso1,cso2,nil
+
+}
+
+func createPrivateRouteTable(svc *ec2.EC2, config *Config) (*string, error) {
+	crt := &ec2.CreateRouteTableInput{ VPCID: &config.VPCID }
+	crto,err := svc.CreateRouteTable(crt)
+	if err != nil {
+		fmt.Println("Failed to create private route table.")
+		return nil,err
+	}
+
+
+	arti := &ec2.AssociateRouteTableInput{ RouteTableID: crto.RouteTable.RouteTableID, SubnetID: &config.PrivateSubnetID }
+	arto, err := svc.AssociateRouteTable(arti)
+	fmt.Println(arto)
+	if err != nil {
+		fmt.Println("Failed to associate private subnet with route table.")
+		return nil,err
+	}
+
+
+	return crto.RouteTable.RouteTableID,nil
 
 }
 
@@ -568,24 +755,43 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 			panic(err)
 		}
 
+
+		haspriv := false
+		haspub := false
 		for i := range dso.Subnets {
-			if *dso.Subnets[i].CIDRBlock == config.VPC {
-				fmt.Println("Subnet for VPC already exists.")
-				config.SubnetID = *dso.Subnets[i].SubnetID
-				return nil
+			if *dso.Subnets[i].CIDRBlock == config.PublicNet {
+				fmt.Println("Subnet for public VPC already exists.")
+				config.PublicSubnetID = *dso.Subnets[i].SubnetID
+				haspub = true
+				continue
+			}
+
+			if *dso.Subnets[i].CIDRBlock == config.PrivateNet {
+				fmt.Println("Subnet for private VPC already exists.")
+				config.PrivateSubnetID = *dso.Subnets[i].SubnetID
+				haspriv = true
+				continue
 			}
 		}
 
-		csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.VPC, VPCID: &config.VPCID}
-		cso,err := c.CreateSubnet(csi)
-		if err != nil {
-			fmt.Println("Create subnet failed")
-			return err
+		if haspub && haspriv {
+			return nil
 		}
-		fmt.Println(cso)
-		config.SubnetID = *cso.Subnet.SubnetID
 
-		return createGateway(c, vpc, cso.Subnet.SubnetID)
+		cso1,cso2,err := createSubnets(c, config)
+		if err != nil {
+			panic(err)
+		}
+		config.PublicSubnetID = *cso1.Subnet.SubnetID
+		config.PrivateSubnetID = *cso2.Subnet.SubnetID
+
+		_,err = createPrivateRouteTable(c,config)
+		if err != nil {
+			panic(err)
+		}
+
+
+		return createGateway(c, vpc, cso1.Subnet.SubnetID)
 
 	}
 
@@ -614,15 +820,16 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 	*/
 
 
-	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.VPC, VPCID: &config.VPCID }
-	cso,err := c.CreateSubnet(csi)
-	if err != nil {
-		return err
-	}
-	fmt.Println(cso)
-	config.SubnetID = *cso.Subnet.SubnetID
+	cso1,cso2,err := createSubnets(c, config)
+	config.PublicSubnetID = *cso1.Subnet.SubnetID
+	config.PrivateSubnetID = *cso2.Subnet.SubnetID
 
-	return createGateway(c, cvo.VPC, cso.Subnet.SubnetID)
+	_,err = createPrivateRouteTable(c,config)
+	if err != nil {
+		panic(err)
+	}
+
+	return createGateway(c, cvo.VPC, cso1.Subnet.SubnetID)
 
 }
 
@@ -663,7 +870,7 @@ func Create(config *Config) {
 
 		if !exists {
 			fmt.Println("No instance found, creating...")
-			userdata := getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name)
+			userdata := getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
 			createInstance(svc, config, config.EC2[i], userdata)
 		}
 
@@ -730,6 +937,7 @@ func Destroy(config *Config) {
 				}
 
 				if config.EC2[i].HasExternalIP {
+					waitForNonXState(svc, instances[k].InstanceID, "shutting-down")
 					err := releaseExternalIP(svc, *instances[k].InstanceID)
 					if err != nil {
 						fmt.Println("Failed to release ip: ", err)

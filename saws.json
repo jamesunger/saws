@@ -2,6 +2,8 @@
    "initialconfig": "initial-config.sh",
    "s3bucket" : "384u7fkfj-debtest",
    "vpc" : "192.168.98.0/24",
+   "privatenet" : "192.168.98.0/25",
+   "publicnet" : "192.168.98.128/25",
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22
@@ -9,10 +11,18 @@
    "ec2" : [
       {
          "instancetype" : "t1.micro",
-         "name" : "debiantest1",
+         "name" : "salt",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
 	 "hasexternalip" : true,
+	 "isnat" : true,
+	 "securitygroups" : [ "default", "ssh" ]
+      },
+      {
+         "instancetype" : "t1.micro",
+         "name" : "debiantest1",
+         "ami" : "ami-baeda9d2",
+         "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh" ]
       },
       {
@@ -20,18 +30,7 @@
          "name" : "debiantest2",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "hasexternalip" : true,
-	 "securitygroups" : [ "default", "ssh" ]
-      },
-      {
-         "instancetype" : "t1.micro",
-         "name" : "salt",
-         "ami" : "ami-baeda9d2",
-         "keyname" : "tor-cloud-servers",
-	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh" ]
       }
-
-
    ]
 }
