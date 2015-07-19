@@ -1,6 +1,6 @@
 {
    "initialconfig": "initial-config.sh",
-   "s3bucket" : "384u7fkfj-wintest",
+   "s3bucket" : "384u7fkfj-debtest",
    "vpc" : "192.168.98.0/24",
    "allsecuritygroups" : [ {
 			"name": "ssh",
@@ -20,6 +20,15 @@
          "name" : "debiantest2",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
+	 "hasexternalip" : true,
+	 "securitygroups" : [ "default", "ssh" ]
+      },
+      {
+         "instancetype" : "t1.micro",
+         "name" : "salt",
+         "ami" : "ami-baeda9d2",
+         "keyname" : "tor-cloud-servers",
+	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh" ]
       }
 

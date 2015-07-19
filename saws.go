@@ -17,6 +17,7 @@ import (
 	"time"
 	"errors"
 	"strings"
+	"bytes"
 )
 
 type Config struct {
@@ -45,7 +46,7 @@ type EC2 struct {
 	HasExternalIP bool `json:hasexternalip`
 }
 
-func getUserData(initialconfig string, s3bucket string) string {
+func getUserData(initialconfig string, s3bucket string, hostname string) string {
 	ic, err := ioutil.ReadFile(initialconfig)
 	if err != nil {
 		panic(err)
@@ -68,13 +69,14 @@ func getUserData(initialconfig string, s3bucket string) string {
 	rxpid := regexp.MustCompile("SAWS_ACCESS_KEY")
 	rxpkey := regexp.MustCompile("SAWS_SECRET_KEY")
 	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
+	rxphostname := regexp.MustCompile("SAWS_HOSTNAME")
 	ic1 := rxpid.ReplaceAll(ic, []byte(accid))
 	ic2 := rxpkey.ReplaceAll(ic1, []byte(seck))
 	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
+	ic4 := rxphostname.ReplaceAll(ic3, []byte(hostname))
 
 
-	return base64.StdEncoding.EncodeToString([]byte(ic3))
-	
+	return base64.StdEncoding.EncodeToString([]byte(ic4))
 }
 
 func parseConfig(configfile string) *Config {
@@ -115,6 +117,43 @@ func uploadPackage(config *Config) error {
 	return nil
 }
 
+func deleteSawsInfo(config *Config) error {
+	key := "saws-info.json"
+	doi := &s3.DeleteObjectInput{ Bucket: &config.S3Bucket, Key: &key }
+
+	svc := s3.New(nil)
+	doo,err := svc.DeleteObject(doi)
+	fmt.Println(doo)
+	if err != nil {
+		fmt.Println("Failed to delete saws-info.json")
+		return err
+	}
+
+	return nil
+
+}
+
+func sendSawsInfo(config *Config) error {
+	jsonBytes := getJsonInstanceInfo(config)
+	jsonBytesReader := bytes.NewReader(jsonBytes)
+
+	key := "saws-info.json"
+	uploader := s3manager.NewUploader(nil)
+	_, err := uploader.Upload(&s3manager.UploadInput{
+		Bucket: &config.S3Bucket,
+		Key:    &key,
+		Body:   jsonBytesReader,
+	})
+
+	if err != nil {
+		fmt.Println("Failed to upload saws-info.json.")
+		return err
+	}
+
+
+	return nil
+}
+
 func Push(config *Config) {
 	uploadPackage(config)
 }
@@ -149,7 +188,8 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 
 		time.Sleep(2*time.Second)
 		count++
-		fmt.Println(dio)
+		//fmt.Println(dio)
+		fmt.Println("waiting...")
 	}
 
 
@@ -166,8 +206,8 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 	subnet := config.SubnetID
 	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, &ec2config)
 	params := &ec2.RunInstancesInput{
-    		ImageID:      &ec2config.AMI,
-    		InstanceType: &ec2config.InstanceType,
+		ImageID:      &ec2config.AMI,
+		InstanceType: &ec2config.InstanceType,
 		MaxCount: &max,
 		MinCount: &min,
 		KeyName: &ec2config.KeyName,
@@ -187,11 +227,11 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 
 		fmt.Println("Sleeping for a sec to give AWS some time ...")
 		time.Sleep(1*time.Second)
-		
+
 		keyname := "Name"
 		_, err := svc.CreateTags(&ec2.CreateTagsInput{
 			Resources: []*string{rres.Instances[0].InstanceID},
-			Tags:      []*ec2.Tag{ 
+			Tags:      []*ec2.Tag{
 				&ec2.Tag{
 					Key:   &keyname,
 					Value:   &ec2config.Name,
@@ -215,7 +255,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 			aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
 			if err != nil {
 				fmt.Println("Could not allocate addr:", err)
- 			}
+			}
 
 			fmt.Println(aao)
 
@@ -228,7 +268,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 				aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
 				if err != nil {
 					fmt.Println("Could not assign addr:", err)
- 				}
+				}
 
 				fmt.Println(aai)
 			}
@@ -237,7 +277,6 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 
 	}
 
-		
 }
 
 func getNonTerminatedInstance(instances []*ec2.Instance) *ec2.Instance {
@@ -245,7 +284,7 @@ func getNonTerminatedInstance(instances []*ec2.Instance) *ec2.Instance {
 		fmt.Println(instances[i])
 		if instances[i].InstanceID != nil && *instances[i].State.Name != "terminated" {
 			fmt.Println("Found instance!")
-			return instances[i]	
+			return instances[i]
 		}
 	}
 
@@ -294,9 +333,34 @@ func getInstancesByName(svc *ec2.EC2, tag string) []*ec2.Instance {
 
 }
 
-func Stat(config *Config) {
-	
+func getJsonInstanceInfo(config *Config) []byte {
 	svc := ec2.New(nil)
+	instancelist := make([]*ec2.Instance,0)
+	for i := range config.EC2 {
+		instances := getInstancesByName(svc,config.EC2[i].Name)
+		for k := range instances {
+			instancelist = append(instancelist,instances[k])
+		}
+	}
+	marsh,err := json.Marshal(instancelist)
+	if err != nil {
+		fmt.Println("Failed to unmarshal", err)
+		panic(err)
+	}
+
+
+	return marsh
+
+}
+
+func Stat(config *Config) {
+	//svc := ec2.New(nil)
+
+
+	instanceinfo := getJsonInstanceInfo(config)
+	fmt.Println(string(instanceinfo))
+
+	/*
 
 	for i := range config.EC2 {
 		fmt.Println(config.EC2[i].Name)
@@ -307,8 +371,10 @@ func Stat(config *Config) {
 
 		//exists := false
 		for k := range instances {
-			fmt.Println(*instances[k].InstanceID)	
+			fmt.Println(*instances[k].InstanceID)
 			fmt.Println(instances[k])
+
+
 			userd := "userData"
 			diai := &ec2.DescribeInstanceAttributeInput{
 					Attribute: &userd,
@@ -323,7 +389,7 @@ func Stat(config *Config) {
 			//fmt.Println(dao.UserData.Value)
 		}
 	}
-
+	*/
 
 
 }
@@ -360,7 +426,7 @@ func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
 		fmt.Println("Failed to attach gateway.")
 		return err
 	}
-	
+
 	defgtw := "0.0.0.0/0"
 	rtid,err := getRouteTableFromVPC(svc, vpc.VPCID)
 	if err != nil {
@@ -402,7 +468,7 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 			}
 
 			everywhere := "0.0.0.0/0"
-		 	proto := "tcp"
+			proto := "tcp"
 			//var fromPort int64
 			//fromPort = -1
 			asgii := &ec2.AuthorizeSecurityGroupIngressInput{ CIDRIP: &everywhere, FromPort: &config.AllSecurityGroups[j].TcpPort, ToPort: &config.AllSecurityGroups[j].TcpPort, GroupID: csgo.GroupID, IPProtocol: &proto }
@@ -418,7 +484,7 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 }
 
 func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
-	
+
 
 	//secgroups := make([]*string,0)
 	secgroupids := make([]*string,0)
@@ -464,7 +530,7 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 		return err
 	}
 
-	
+
 	vpc := &ec2.VPC{}
 	vpcexists := false
 	for i := range dvo.VPCs {
@@ -525,10 +591,10 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 
 	cvi := &ec2.CreateVPCInput{ CIDRBlock: &config.VPC }
 	cvo, err := c.CreateVPC(cvi)
-	
+
 	if err != nil {
 		return err
-	}	
+	}
 	config.VPCID = *cvo.VPC.VPCID
 	fmt.Println("newly created vpid " + config.VPCID)
 
@@ -572,6 +638,11 @@ func Create(config *Config) {
 
 
 
+	err = deleteSawsInfo(config)
+	if err != nil {
+		panic(err)
+	}
+
 	//fmt.Println("Creating with", config)
 	for i := range config.EC2 {
 		fmt.Println(config.EC2[i].Name)
@@ -592,12 +663,47 @@ func Create(config *Config) {
 
 		if !exists {
 			fmt.Println("No instance found, creating...")
-			userdata := getUserData(config.InitialConfig,config.S3Bucket)
+			userdata := getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name)
 			createInstance(svc, config, config.EC2[i], userdata)
-			
 		}
 
 	}
+
+
+	//jsonInstanceInfo := getJsonInstanceInfo(config)
+	//fmt.Println(jsonInstanceInfo)
+	err = sendSawsInfo(config)
+	if err != nil {
+		panic(err)
+	}
+
+	//fmt.Println("Creating with", config)
+}
+
+func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
+	keyname := "instance-id"
+
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ &instanceid } }
+	filters := []*ec2.Filter{
+		&filter,
+	}
+	dai := &ec2.DescribeAddressesInput{ Filters: filters }
+	dao,err := svc.DescribeAddresses(dai)
+	if err != nil {
+		return err
+	}
+
+	for i := range dao.Addresses {
+		fmt.Println(dao.Addresses[i])
+		rai := &ec2.ReleaseAddressInput{ AllocationID: dao.Addresses[i].AllocationID }
+		_,err := svc.ReleaseAddress(rai)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func Destroy(config *Config) {
@@ -615,12 +721,21 @@ func Destroy(config *Config) {
 				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance will be terminated: ", *instances[k].InstanceID)
+
 				instanceids := []*string{ instances[k].InstanceID }
 				tii := ec2.TerminateInstancesInput { InstanceIDs: instanceids }
 				_,err := svc.TerminateInstances(&tii)
 				if err != nil {
 					panic(err)
 				}
+
+				if config.EC2[i].HasExternalIP {
+					err := releaseExternalIP(svc, *instances[k].InstanceID)
+					if err != nil {
+						fmt.Println("Failed to release ip: ", err)
+					}
+				}
+
 				fmt.Println("Terminated instance ", *instances[k].InstanceID)
 
 			}
@@ -628,6 +743,65 @@ func Destroy(config *Config) {
 	}
 
 }
+
+func Start(config *Config) {
+	svc := ec2.New(nil)
+
+	for i := range config.EC2 {
+		fmt.Println(config.EC2[i].Name)
+		fmt.Println(config.EC2[i].InstanceType)
+
+
+		instances := getInstancesByName(svc,config.EC2[i].Name)
+		for k := range instances {
+			if *instances[k].State.Name == "terminated" {
+				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+			} else {
+				fmt.Println("Instance will be started: ", *instances[k].InstanceID)
+				instanceids := []*string{ instances[k].InstanceID }
+				sii := ec2.StartInstancesInput { InstanceIDs: instanceids }
+				_,err := svc.StartInstances(&sii)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Println("Started instance ", *instances[k].InstanceID)
+
+			}
+		}
+	}
+
+}
+
+
+func Stop(config *Config) {
+	svc := ec2.New(nil)
+
+	for i := range config.EC2 {
+		fmt.Println(config.EC2[i].Name)
+		fmt.Println(config.EC2[i].InstanceType)
+
+
+		instances := getInstancesByName(svc,config.EC2[i].Name)
+		for k := range instances {
+			if *instances[k].State.Name == "terminated" {
+				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+			} else {
+				fmt.Println("Instance will be shutdown: ", *instances[k].InstanceID)
+				instanceids := []*string{ instances[k].InstanceID }
+				sii := ec2.StopInstancesInput { InstanceIDs: instanceids }
+				_,err := svc.StopInstances(&sii)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Println("Stopped instance ", *instances[k].InstanceID)
+
+			}
+		}
+	}
+
+}
+
+
 
 func copyContents(r io.Reader, w io.Writer) error {
 	b := make([]byte, 4096)
@@ -741,19 +915,17 @@ func main() {
 		action     string
 	)
 	flag.StringVar(&configfile, "c", "saws.json", "Config file to use")
-	flag.StringVar(&action, "a", "pack", "Action, create/destroy/pack/push/stat")
+	flag.StringVar(&action, "a", "pack", "Action, create/destroy/start/stop/pack/push/stat")
 	flag.Parse()
 
 	config := parseConfig(configfile)
 
-	fmt.Println("S3Bucket ", config.S3Bucket)
 
 	client := s3.New(nil)
 	lb, err := client.ListBuckets(nil)
 	if err != nil {
 		panic(err)
 	}
-	//fmt.Println(lb.GoString())
 
 	// FIXME: no need to loop over buckets
 	bucketExists := false
@@ -764,10 +936,6 @@ func main() {
 			break
 		}
 
-		//fmt.Printf("Bucket: %s\n",*lb.Buckets[i].Name)
-		//lin := &s3.ListObjectsInput{ Bucket: lb.Buckets[i].Name }
-		//lout,_ := client.ListObjects(lin)
-		//fmt.Println(lout.GoString())
 	}
 
 	if !bucketExists {
@@ -787,6 +955,10 @@ func main() {
 		Destroy(config)
 	case action == "push":
 		Push(config)
+	case action == "stop":
+		Stop(config)
+	case action == "start":
+		Start(config)
 	case action == "stat":
 		Stat(config)
 	default:
