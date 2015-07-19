@@ -950,6 +950,38 @@ func Destroy(config *Config) {
 		}
 	}
 
+
+	fmt.Println("Everything but the VPC destroyed.")
+
+	/*
+	dvi := &ec2.DescribeVPCsInput{}
+	dvo,err := svc.DescribeVPCs(dvi)
+	if err != nil {
+		panic(err)
+	}
+
+
+	//vpcid := ""
+	for i := range dvo.VPCs {
+		if *dvo.VPCs[i].CIDRBlock == config.VPC {
+			config.VPCID = *dvo.VPCs[i].VPCID
+		}
+	}
+
+
+
+
+
+	fmt.Println("All instances destroyed, resting a bit and removing VPC...")
+	time.Sleep(5*time.Second)
+	devi := &ec2.DeleteVPCInput{ VPCID: &config.VPCID }
+	_,err = svc.DeleteVPC(devi)
+
+	if err != nil {
+		fmt.Println("Error deleting vpc: ", err)
+	}
+	*/
+
 }
 
 func Start(config *Config) {
