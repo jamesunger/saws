@@ -45,8 +45,5 @@
 	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "rdp" ]
       }
-
-
-
    ]
 }

@@ -632,8 +632,9 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.CreateSubnetOutput, error) {
 
 
-	useast1d := "us-east-1d"
-	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &useast1d }
+	//useast1d := "us-east-1d"
+	//csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &useast1d }
+	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
 	cso1,err := svc.CreateSubnet(csi)
 	if err != nil {
 		fmt.Println("Create public subnet failed")
