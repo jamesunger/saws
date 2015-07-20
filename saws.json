@@ -7,7 +7,11 @@
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22
-			} ],
+			},
+			{ "name": "rdp",
+			  "tcpport": 3389 
+			}
+			 ],
    "ec2" : [
       {
          "instancetype" : "t1.micro",
@@ -31,6 +35,18 @@
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh" ]
+      },
+      {
+         "instancetype" : "t2.micro",
+         "name" : "wintest1",
+         "ami" : "ami-5b9e6b30",
+         "keyname" : "tor-cloud-servers",
+	 "initialconfig" : "initial-config.ps1",
+	 "hasexternalip" : true,
+	 "securitygroups" : [ "default", "rdp" ]
       }
+
+
+
    ]
 }

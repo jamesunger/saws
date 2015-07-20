@@ -128,8 +128,8 @@ func deleteSawsInfo(config *Config) error {
 	doi := &s3.DeleteObjectInput{ Bucket: &config.S3Bucket, Key: &key }
 
 	svc := s3.New(nil)
-	doo,err := svc.DeleteObject(doi)
-	fmt.Println(doo)
+	_,err := svc.DeleteObject(doi)
+	//fmt.Println(doo)
 	if err != nil {
 		fmt.Println("Failed to delete saws-info.json")
 		return err
@@ -176,7 +176,8 @@ func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 	}
 
 
-	fmt.Println(dio)
+	fmt.Println("waiting for instance to leave state ", state)
+	//fmt.Println(dio)
 	count := 0
 	for {
 		dio,err = svc.DescribeInstances(dii)
@@ -195,7 +196,7 @@ func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 		time.Sleep(2*time.Second)
 		count++
 		//fmt.Println(dio)
-		fmt.Println("waiting...")
+		//fmt.Println("waiting for instance to leave state ", state)
 	}
 
 
@@ -216,7 +217,8 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 	}
 
 
-	fmt.Println(dio)
+	fmt.Println("waiting for non pending state...")
+	//fmt.Println(dio)
 	count := 0
 	for {
 		dio,err = svc.DescribeInstances(dii)
@@ -235,7 +237,7 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 		time.Sleep(2*time.Second)
 		count++
 		//fmt.Println(dio)
-		fmt.Println("waiting...")
+		//fmt.Println("waiting for non pending state...")
 	}
 
 
@@ -269,17 +271,17 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		SubnetID: &subnet,
 		SecurityGroupIDs: ec2config.SecurityGroupIDs,
 	}
-	fmt.Println("Create instance params:", params)
+	//fmt.Println("Create instance params:", params)
 
 	rres, err := svc.RunInstances(params)
 	if err != nil {
 		fmt.Println("Failed to create instance",err)
 		fmt.Println(rres)
 	} else {
-		fmt.Println("Created instance")
+		fmt.Println("Created ", *rres.Instances[0].InstanceID)
 		//fmt.Println(rres)
 
-		fmt.Println("Sleeping for a sec to give AWS some time ...")
+		//fmt.Println("Sleeping for a sec to give AWS some time ...")
 
 
 	time.Sleep(1*time.Second)
@@ -300,12 +302,12 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		if err != nil {
 			fmt.Println("Could not create tags for instance ", rres.Instances[0].InstanceID)
 			fmt.Println(err)
-		} else {
-			fmt.Println("Created tag Name with value", ec2config.Name)
-		}
+		} //else {
+			//fmt.Println("Created tag Name with value", ec2config.Name)
+		//}
 
 
-		fmt.Println("hasexternalip ", ec2config.HasExternalIP)
+		//fmt.Println("hasexternalip ", ec2config.HasExternalIP)
 		if ec2config.HasExternalIP {
 			vpcs := "vpc"
 			aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
@@ -313,7 +315,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 				fmt.Println("Could not allocate addr:", err)
 			}
 
-			fmt.Println(aao)
+			//fmt.Println(aao)
 
 
 			err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
@@ -321,17 +323,19 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 				fmt.Println(err)
 			} else {
 				//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
-				aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+				_,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
 				if err != nil {
 					fmt.Println("Could not assign addr:", err)
 				}
 
-				fmt.Println(aai)
+				//fmt.Println(aai)
 			}
+
+			fmt.Println("External IP: ", *aao.PublicIP)
 
 		}
 
-		fmt.Println("isnat", ec2config.IsNat)
+		//fmt.Println("isnat", ec2config.IsNat)
 		if ec2config.IsNat {
 			bv := false
 			abv := &ec2.AttributeBooleanValue{ Value: &bv }
@@ -358,6 +362,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 				fmt.Println("Error adding new default route to NAT node", err)
 			}
 
+			fmt.Println("Configured for NAT: ", *rres.Instances[0].InstanceID)
 		}
 
 	}
@@ -488,7 +493,7 @@ func getMainRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
 		Name: &keyname, Values: []*string{ &asbool } }
 	filters = append(filters,&filter)
 
-	fmt.Println("Filters ", filters)
+	//fmt.Println("Filters ", filters)
 
 
 	drti := &ec2.DescribeRouteTablesInput{ Filters: filters}
@@ -499,7 +504,7 @@ func getMainRouteTableFromVPC(svc *ec2.EC2, VPCID *string) (*string, error) {
 
 	for i := range drto.RouteTables {
 		if *drto.RouteTables[i].VPCID == *VPCID {
-			fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
+			//fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
 			return drto.RouteTables[i].RouteTableID,nil
 		}
 	}
@@ -517,7 +522,7 @@ func getPrivateRouteTable(svc *ec2.EC2, subnetid *string, VPCID string) (*string
 		Name: &keyname, Values: []*string{ subnetid } }
 	filters = append(filters,&filter)
 
-	fmt.Println("Filters ", filters)
+	//fmt.Println("Filters ", filters)
 
 	drti := &ec2.DescribeRouteTablesInput{Filters: filters}
 	drto,err := svc.DescribeRouteTables(drti)
@@ -527,7 +532,7 @@ func getPrivateRouteTable(svc *ec2.EC2, subnetid *string, VPCID string) (*string
 
 	for i := range drto.RouteTables {
 		if *drto.RouteTables[i].VPCID == VPCID {
-			fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
+			//fmt.Println("Route table is", *drto.RouteTables[i].RouteTableID)
 			return drto.RouteTables[i].RouteTableID,nil
 		}
 	}
@@ -558,7 +563,7 @@ func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
 		return err
 	}
 
-	fmt.Println("We have vpcid: " + *vpc.VPCID)
+	//fmt.Println("We have vpcid: " + *vpc.VPCID)
 	_,err = svc.AttachInternetGateway(&ec2.AttachInternetGatewayInput{InternetGatewayID: cigo.InternetGateway.InternetGatewayID, VPCID: vpc.VPCID})
 	if err != nil {
 		fmt.Println("Failed to attach gateway.")
@@ -572,16 +577,16 @@ func createGateway(svc *ec2.EC2, vpc *ec2.VPC, subid *string) error {
 		panic(err)
 	}
 	cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defr, GatewayID: cigo.InternetGateway.InternetGatewayID, RouteTableID: rtid }
-	cro,err := svc.CreateRoute(cri)
-	fmt.Println(cro)
+	_,err = svc.CreateRoute(cri)
+	//fmt.Println(cro)
 	if err != nil {
 		fmt.Println("Failed to create default route.")
 		return err
 	}
 
 	arti := &ec2.AssociateRouteTableInput{ RouteTableID: rtid, SubnetID: subid }
-	arto, err := svc.AssociateRouteTable(arti)
-	fmt.Println(arto)
+	_, err = svc.AssociateRouteTable(arti)
+	//fmt.Println(arto)
 	if err != nil {
 		fmt.Println("Failed to associate subnet with route table.")
 		return err
@@ -595,7 +600,7 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 		for j := range config.AllSecurityGroups {
 			csgi := &ec2.CreateSecurityGroupInput{ GroupName: &config.AllSecurityGroups[j].Name, VPCID: &config.VPCID, Description: &config.AllSecurityGroups[j].Name }
 			csgo,err := c.CreateSecurityGroup(csgi)
-			fmt.Println(err)
+			//fmt.Println(err)
 			if err != nil {
 				fmt.Println("Failed to create security group.")
 				fmt.Println(err)
@@ -611,10 +616,11 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 			//fromPort = -1
 			asgii := &ec2.AuthorizeSecurityGroupIngressInput{ CIDRIP: &everywhere, FromPort: &config.AllSecurityGroups[j].TcpPort, ToPort: &config.AllSecurityGroups[j].TcpPort, GroupID: csgo.GroupID, IPProtocol: &proto }
 			_,err = c.AuthorizeSecurityGroupIngress(asgii)
+			//fmt.Println("Adding security group", asgii)
 			if err != nil {
-			}
-				fmt.Println("Failed to add rule to security group.")
+				fmt.Println("Failed to add rule to security group: ", err)
 				return err
+			}
 		}
 
 	return nil
@@ -631,7 +637,7 @@ func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.
 		fmt.Println("Create public subnet failed")
 		return nil,nil,err
 	}
-	fmt.Println(cso1)
+	//fmt.Println(cso1)
 	config.PublicSubnetID = *cso1.Subnet.SubnetID
 
 	csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID}
@@ -640,7 +646,7 @@ func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.
 		fmt.Println("Create private subnet failed")
 		return nil,nil,err
 	}
-	fmt.Println(cso2)
+	//fmt.Println(cso2)
 	config.PrivateSubnetID = *cso2.Subnet.SubnetID
 
 
@@ -658,8 +664,8 @@ func createPrivateRouteTable(svc *ec2.EC2, config *Config) (*string, error) {
 
 
 	arti := &ec2.AssociateRouteTableInput{ RouteTableID: crto.RouteTable.RouteTableID, SubnetID: &config.PrivateSubnetID }
-	arto, err := svc.AssociateRouteTable(arti)
-	fmt.Println(arto)
+	_, err = svc.AssociateRouteTable(arti)
+	//fmt.Println(arto)
 	if err != nil {
 		fmt.Println("Failed to associate private subnet with route table.")
 		return nil,err
@@ -688,7 +694,7 @@ func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
 		filters = append(filters,&filter)
 		filters = append(filters,&filter2)
 
-		fmt.Println("Filters ", filters)
+		//fmt.Println("Filters ", filters)
 
 		dsgi := &ec2.DescribeSecurityGroupsInput{ Filters: filters }
 		dsgo,err := c.DescribeSecurityGroups(dsgi)
@@ -704,7 +710,7 @@ func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
 	}
 
 
-	fmt.Println("Security Groups!", secgroupids)
+	//fmt.Println("Security Groups!", secgroupids)
 	return secgroupids
 
 }
@@ -802,9 +808,9 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 		return err
 	}
 	config.VPCID = *cvo.VPC.VPCID
-	fmt.Println("newly created vpid " + config.VPCID)
+	fmt.Println("Created new VPC: " + config.VPCID)
 
-	fmt.Println(cvo)
+	//fmt.Println(cvo)
 	err = createSecurityGroups(c, config)
 	if err != nil {
 		fmt.Println("Failed to create security groups.")
@@ -852,15 +858,15 @@ func Create(config *Config) {
 
 	//fmt.Println("Creating with", config)
 	for i := range config.EC2 {
-		fmt.Println(config.EC2[i].Name)
-		fmt.Println(config.EC2[i].InstanceType)
+		fmt.Println("Creating EC2 instance: ", config.EC2[i].Name)
+		//fmt.Println(config.EC2[i].InstanceType)
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
 
 		exists := false
 		for k := range instances {
 			if *instances[k].State.Name == "terminated" {
-				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance already exists: ", *instances[k].InstanceID)
 				exists = true
@@ -902,7 +908,7 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 	}
 
 	for i := range dao.Addresses {
-		fmt.Println(dao.Addresses[i])
+		//fmt.Println(dao.Addresses[i])
 		rai := &ec2.ReleaseAddressInput{ AllocationID: dao.Addresses[i].AllocationID }
 		_,err := svc.ReleaseAddress(rai)
 		if err != nil {
@@ -918,14 +924,14 @@ func Destroy(config *Config) {
 	svc := ec2.New(nil)
 
 	for i := range config.EC2 {
-		fmt.Println(config.EC2[i].Name)
-		fmt.Println(config.EC2[i].InstanceType)
+		fmt.Println("Destroying EC2 instance: ", config.EC2[i].Name)
+		//fmt.Println(config.EC2[i].InstanceType)
 
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
 		for k := range instances {
 			if *instances[k].State.Name == "terminated" {
-				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance will be terminated: ", *instances[k].InstanceID)
 
@@ -988,14 +994,14 @@ func Start(config *Config) {
 	svc := ec2.New(nil)
 
 	for i := range config.EC2 {
-		fmt.Println(config.EC2[i].Name)
-		fmt.Println(config.EC2[i].InstanceType)
+		fmt.Println("Starting ", config.EC2[i].Name)
+		//fmt.Println(config.EC2[i].InstanceType)
 
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
 		for k := range instances {
 			if *instances[k].State.Name == "terminated" {
-				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance will be started: ", *instances[k].InstanceID)
 				instanceids := []*string{ instances[k].InstanceID }
@@ -1017,14 +1023,14 @@ func Stop(config *Config) {
 	svc := ec2.New(nil)
 
 	for i := range config.EC2 {
-		fmt.Println(config.EC2[i].Name)
-		fmt.Println(config.EC2[i].InstanceType)
+		fmt.Println("Stopping ", config.EC2[i].Name)
+		//fmt.Println(config.EC2[i].InstanceType)
 
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
 		for k := range instances {
 			if *instances[k].State.Name == "terminated" {
-				fmt.Println("Instance is terminated:", *instances[k].InstanceID)
+				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance will be shutdown: ", *instances[k].InstanceID)
 				instanceids := []*string{ instances[k].InstanceID }
