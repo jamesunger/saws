@@ -40,6 +40,7 @@ type SecurityGroup struct {
 
 type EC2 struct {
 	Name         string `json:string`
+	InitialConfig     string  `json:initialconfig`
 	InstanceType string `json:instancetype`
 	AMI string `json:ami`
 	KeyName string `json:keyname`
@@ -107,6 +108,7 @@ func uploadPackage(config *Config) error {
 		return err
 	}
 
+	fmt.Println("Uploading package.zip to", config.S3Bucket, "bucket...")
 	uploader := s3manager.NewUploader(nil)
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: &config.S3Bucket,
@@ -876,7 +878,12 @@ func Create(config *Config) {
 
 		if !exists {
 			fmt.Println("No instance found, creating...")
-			userdata := getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
+			var userdata string
+			if config.EC2[i].InitialConfig == "" {
+				userdata = getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
+			} else {
+				userdata = getUserData(config.EC2[i].InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
+			}
 			createInstance(svc, config, config.EC2[i], userdata)
 		}
 

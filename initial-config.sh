@@ -18,12 +18,10 @@ export AWS_SECRET_ACCESS_KEY=SAWS_SECRET_KEY
 export AWS_REGION=us-east-1
 export AWS_ACCESS_KEY_ID=SAWS_ACCESS_KEY
 
-echo "Before package.zip" >>/tmp/install-log.log
 /usr/local/bin/aws s3 cp s3://SAWS_S3BUCKET/package.zip /root/package.zip
 mkdir /root/saws-package
 cd /root/saws-package
 unzip /root/package.zip
-echo "After package.zip" >>/tmp/install-log.log
 
 INFOEXISTS="$(/usr/local/bin/aws s3 cp s3://SAWS_S3BUCKET/saws-info.json /root/saws-info.json 2>&1 > /dev/null)"
 while [[ "$INFOEXISTS" == *"404"* ]]; do
@@ -33,7 +31,6 @@ while [[ "$INFOEXISTS" == *"404"* ]]; do
 done
 
 perl /root/saws-package/gen-hosts.pl
-
 
 ## install salt
 if [[ "SAWS_HOSTNAME" == "salt" ]]; then
@@ -45,4 +42,6 @@ if [[ "SAWS_HOSTNAME" == "salt" ]]; then
 else
 	apt-get update
         apt-get -y --force-yes install salt-minion
+	echo "id: SAWS_HOSTNAME" >>/etc/salt/minion
+	/etc/init.d/salt-minion restart
 fi
