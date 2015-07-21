@@ -18,7 +18,7 @@ Commands available:
 
 1. saws -a create
 2. saws -a destroy
-3. saws -a package
+3. saws -a pack
 4. saws -a push
 5. saws -a stop
 6. saws -a start
@@ -37,6 +37,25 @@ saws.json
 ---------
 
 The saws.json file defines the VPC and associated AWS services and is the only configuration input for <code>saws</code>. Saws expects to find the saws.json (or specifically overloaded via -c) file in the current directory along with the associated scripts and data used to initialize the nodes.
+
+The configuration file is designed to contain the minimum amount of information necessary to determinately recreate an environment. Important JSON configuration params:
+
+* initialconfig: file to use for initial UserData. This file will be templated with key AWS information: SAWS_ACCESSKEY, SAWS_SECRETKEY, SAWS_S3BUCKET, SAWS_HOSTNAME, SAWS_VPC
+* s3bucket: the S3 bucket to store central configuration data. This will be automatically created if it does not exist
+* vpc: the CIDR range of the VPC. This should encompass any private/public subnet CIDR range.
+* privatenet: the CIDR range of the private subnet in the VPC
+* publicnet: the CIDR range of the public subnet in the VPC
+* allsecuritygroups: defines specific security groups. The only options are 'name' and 'tcpport' which affect ingress security group filters.
+* ec2: an array of ec2 definitions
+	* instancetype: AWS instance type
+	* name: name of the EC2 instance, which will be tagged with a Name tag
+	* ami: AMI to use when creating the instance
+	* keyname: the SSH key/value pair used to access the instance
+	* securitygroups: a list of strings to map into security groups. 'default' is always available but others must match the 'allsecuritygroups' setting
+	* hasexternalip: if set to true, the instance will be given an external ip (optional)
+	* isnat: if set to true, the instance will have traffic routed to it in order to NAT for other instances (optional)
+	* initialconfig: an overload to use a specific initialconfig template rather than the global one (optional)
+
 
 
 Example
