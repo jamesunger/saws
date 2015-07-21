@@ -925,7 +925,7 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 
 		dai := &ec2.DisassociateAddressInput{ AssociationID: dao.Addresses[i].AssociationID }
 		daio,err := svc.DisassociateAddress(dai)
-		fmt.Println(daio)
+		//fmt.Println(daio)
 		if err != nil {
 			return err
 		}
