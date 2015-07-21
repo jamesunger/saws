@@ -14,7 +14,7 @@ NOTE: This is a very, very early WIP. I wouldn't use it for anything. :)
 
 A JSON config file provides EC2 and other service information.
 
-Four simple commands exist now:
+Commands available:
 
 1. saws -a create
 2. saws -a destroy
@@ -76,7 +76,7 @@ Rejected Keys:
 
 Which we can add with <code>salt-key -A -y</code> and now we can control our test cluster:
 
-<code>
+<pre>
 root@salt:/home/admin# salt '*' grains.item os
 wintest1:
     ----------
@@ -90,4 +90,4 @@ debiantest2:
     ----------
     os:
         Debian
-</code>
+</pre>
