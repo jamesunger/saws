@@ -19,7 +19,7 @@ close(FILE);
 my $info = $json->decode( $json_text );
 open(HOSTS,">/etc/hosts") || die "Failed to open /etc/hosts\n";
 print HOSTS $top;
-foreach my $host (@{$info}) {
+foreach my $host (@{$$info{'EC2'}}) {
         my $hostname = $$host{'Tags'}[0]{'Value'};
         my $ip = $$host{'PrivateIPAddress'};
         print HOSTS "$ip $hostname\n";

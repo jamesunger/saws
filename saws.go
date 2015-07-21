@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
@@ -31,7 +32,22 @@ type Config struct {
 	PrivateSubnetID string `json:privatesubnetid`
 	PublicSubnetID string `json:publicsubnetid`
 	AllSecurityGroups []SecurityGroup `json:allsecuritygroups`
-	AvailZone string `json:availzone`
+	AvailZone1 string `json:availzone1`
+	AvailZone2 string `json:availzone2`
+	RDS []RDS `json:rds`
+}
+
+type RDS struct {
+	AllocatedStorage int64 `json:allocatedstorage`
+	BackupRetentionPeriod int64 `json:backuprentationperiod`
+	DBInstanceClass string `json:dbinstanceclass`
+	DBInstanceIdentifier string `json:dbinstanceidentifier`
+	DBName string `json:dbname`
+	DBSubnetGroupName string `json:dbsubnetgroupname`
+	Engine string `json:engine`
+	EngineVersion string `json:engineversion`
+	MasterUserPassword string `json:masteruserpassword`
+	MasterUsername string `json:MasterUsername`
 }
 
 type SecurityGroup struct {
@@ -50,6 +66,11 @@ type EC2 struct {
 	SecurityGroups []string `json:securitygroups`
 	HasExternalIP bool `json:hasexternalip`
 	IsNat bool `json:isnat`
+}
+
+type SawsInfo struct {
+	EC2 []*ec2.Instance `json:ec2`
+	RDS []*rds.DBInstance `json:rds`
 }
 
 func getUserData(initialconfig string, s3bucket string, hostname string, vpc string) string {
@@ -143,7 +164,7 @@ func deleteSawsInfo(config *Config) error {
 }
 
 func sendSawsInfo(config *Config) error {
-	jsonBytes := getJsonInstanceInfo(config)
+	jsonBytes := getJsonSawsInfo(config)
 	jsonBytesReader := bytes.NewReader(jsonBytes)
 
 	key := "saws-info.json"
@@ -426,16 +447,45 @@ func getInstancesByName(svc *ec2.EC2, tag string) []*ec2.Instance {
 
 }
 
-func getJsonInstanceInfo(config *Config) []byte {
+func getRDSInstanceById(rdsc *rds.RDS, rdsconf *RDS) (*rds.DBInstance,error) {
+	ddbii := &rds.DescribeDBInstancesInput{ DBInstanceIdentifier: &rdsconf.DBInstanceIdentifier }
+	ddbo, err := rdsc.DescribeDBInstances(ddbii)
+	if err != nil {
+		return nil,err
+	}
+
+	return ddbo.DBInstances[0],nil
+
+}
+
+func getJsonSawsInfo(config *Config) []byte {
 	svc := ec2.New(nil)
+	rdsc := rds.New(nil)
 	instancelist := make([]*ec2.Instance,0)
 	for i := range config.EC2 {
+		//fmt.Println(config.EC2[i].Name)
 		instances := getInstancesByName(svc,config.EC2[i].Name)
 		for k := range instances {
 			instancelist = append(instancelist,instances[k])
 		}
 	}
-	marsh,err := json.Marshal(instancelist)
+
+	rdslist := make([]*rds.DBInstance,0)
+	for i := range config.RDS {
+		//fmt.Println(config.RDS[i].DBInstanceIdentifier)
+		dbinstance,err := getRDSInstanceById(rdsc,&config.RDS[i])
+		if err != nil {
+			//fmt.Println("Failed to find db instance", config.RDS[i].DBInstanceIdentifier)
+		} else {
+			rdslist = append(rdslist,dbinstance)
+		}
+	}
+
+	sawsinfo := SawsInfo{}
+	sawsinfo.EC2 = instancelist
+	sawsinfo.RDS = rdslist
+
+	marsh,err := json.Marshal(&sawsinfo)
 	if err != nil {
 		fmt.Println("Failed to unmarshal", err)
 		panic(err)
@@ -450,7 +500,7 @@ func Stat(config *Config) {
 	//svc := ec2.New(nil)
 
 
-	instanceinfo := getJsonInstanceInfo(config)
+	instanceinfo := getJsonSawsInfo(config)
 	fmt.Println(string(instanceinfo))
 
 	/*
@@ -634,8 +684,8 @@ func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.
 
 
 	var csi *ec2.CreateSubnetInput
-	if config.AvailZone != "" {
-		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &config.AvailZone }
+	if config.AvailZone1 != "" {
+		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &config.AvailZone1 }
 	} else {
 		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
 	}
@@ -648,7 +698,13 @@ func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.
 	//fmt.Println(cso1)
 	config.PublicSubnetID = *cso1.Subnet.SubnetID
 
-	csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID}
+	if config.AvailZone2 != "" {
+		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID, AvailabilityZone: &config.AvailZone2 }
+	} else {
+		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID }
+	}
+	//csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
+	//csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PrivateNet, VPCID: &config.VPCID}
 	cso2,err := svc.CreateSubnet(csi)
 	if err != nil {
 		fmt.Println("Create private subnet failed")
@@ -851,6 +907,7 @@ func Create(config *Config) {
 	//fmt.Println("Create not implemented")
 
 	svc := ec2.New(nil)
+	rdsc := rds.New(nil)
 
 	err := verifyAndCreateVPC(svc,config)
 	if err != nil {
@@ -862,6 +919,50 @@ func Create(config *Config) {
 	err = deleteSawsInfo(config)
 	if err != nil {
 		panic(err)
+	}
+
+	for i := range config.RDS {
+		// setup RDS instances
+
+		groupname := "sawsdbprivate"
+		cdbsgi := &rds.CreateDBSubnetGroupInput{ DBSubnetGroupName: &groupname, SubnetIDs: []*string { &config.PrivateSubnetID, &config.PublicSubnetID }, DBSubnetGroupDescription: &groupname }
+		cdsgo,err := rdsc.CreateDBSubnetGroup(cdbsgi)
+		if err != nil {
+			fmt.Println("Failed to create db subnetgroup:", err)
+			//FIXME: search for subnet gorup if already created
+			panic(err)
+		}
+		//fmt.Println(cdsgo)
+
+		/*
+		fmt.Println("Creating with:", config.RDS[i])
+		fmt.Println("DBSubnetGroupName: ", cdsgo.DBSubnetGroup.DBSubnetGroupName)
+		fmt.Println("Engine: ", config.RDS[i].Engine)
+		fmt.Println("DBName: ", config.RDS[i].DBName)
+		fmt.Println("DBInstanceIdentifier: ", config.RDS[i].DBInstanceIdentifier)
+		fmt.Println("AllocatedStorage: ", config.RDS[i].AllocatedStorage)
+		fmt.Println("DBInstanceClass: ", config.RDS[i].DBInstanceClass)
+		fmt.Println("MasterUsername: ", config.RDS[i].MasterUsername)
+		fmt.Println("MasterUserPassword: ", config.RDS[i].MasterUserPassword)
+		*/
+
+		cdbi := &rds.CreateDBInstanceInput{
+				DBSubnetGroupName: cdsgo.DBSubnetGroup.DBSubnetGroupName,
+				Engine: &config.RDS[i].Engine,
+				DBName: &config.RDS[i].DBName,
+				DBInstanceIdentifier: &config.RDS[i].DBInstanceIdentifier,
+				AllocatedStorage: &config.RDS[i].AllocatedStorage,
+				DBInstanceClass: &config.RDS[i].DBInstanceClass,
+				MasterUsername: &config.RDS[i].MasterUsername,
+				MasterUserPassword: &config.RDS[i].MasterUserPassword,
+		}
+		_, err = rdsc.CreateDBInstance(cdbi)
+		if err != nil {
+			fmt.Println("Error creating db instance:",err)
+			panic(err)
+		}
+		//fmt.Println(cdbo)
+		fmt.Println("Created", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
 	}
 
 	//fmt.Println("Creating with", config)
@@ -896,6 +997,10 @@ func Create(config *Config) {
 	}
 
 
+
+	//if len(config.RDS) > 0 {
+	//	fmt.Println("Waiting for 
+	//}
 	//jsonInstanceInfo := getJsonInstanceInfo(config)
 	//fmt.Println(jsonInstanceInfo)
 	err = sendSawsInfo(config)
@@ -944,6 +1049,7 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 func Destroy(config *Config) {
 	//fmt.Println("Destroy not implemented")
 	svc := ec2.New(nil)
+	rdsc := rds.New(nil)
 
 	for i := range config.EC2 {
 		fmt.Println("Destroying EC2 instance: ", config.EC2[i].Name)
@@ -979,6 +1085,28 @@ func Destroy(config *Config) {
 		}
 	}
 
+
+	for i := range config.RDS {
+		abool := true
+		ddbi := &rds.DeleteDBInstanceInput{ DBInstanceIdentifier: &config.RDS[i].DBInstanceIdentifier, SkipFinalSnapshot: &abool }
+		_,err := rdsc.DeleteDBInstance(ddbi)
+		if err != nil {
+			fmt.Println("Error deleting instance:", err)
+		}
+		//fmt.Println(ddbo)
+		fmt.Println("Destroyed", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
+	}
+	/*
+	for i := range config.RDS {
+		ddbii := &rds.DescribeDBInstancesInput{ DBInstanceIdentifier: config.RDS[i].DBInstanceIdentifier }
+		ddbo,err := rdsc.DescribeDBInstances(ddbii)
+		if err != nil {
+			panic(err)
+		}
+
+
+	}
+	*/
 
 	fmt.Println("Everything but the VPC destroyed.")
 

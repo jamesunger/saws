@@ -4,7 +4,8 @@
    "vpc" : "192.168.98.0/24",
    "privatenet" : "192.168.98.0/25",
    "publicnet" : "192.168.98.128/25",
-   "availzone" : "us-east-1d",
+   "availzone1" : "us-east-1c",
+   "availzone2" : "us-east-1d",
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22
@@ -46,5 +47,16 @@
 	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "rdp" ]
       }
+   ],
+  "rds" : [
+	{
+		"dbname": "testmysql",
+		"engine": "MySQL",
+		"dbinstanceidentifier": "someid",
+		"allocatedstorage": 5,
+		"dbinstanceclass": "db.t1.micro",
+		"masterusername": "mysqlroot",
+		"masteruserpassword": "ibai3ah85"
+	}
    ]
 }

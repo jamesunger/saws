@@ -5,7 +5,7 @@ $info = ConvertFrom-Json -InputObject $sawsinfo
 
 
 $output = ""
-foreach ($h in $info) {
+foreach ($h in $info.EC2) {
   $hostname = $h.Tags[0].Value
   $addr = $h.PrivateIPAddress
   $output = $output + "$addr $hostname`r`n"
