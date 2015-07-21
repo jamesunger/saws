@@ -4,6 +4,7 @@
    "vpc" : "192.168.98.0/24",
    "privatenet" : "192.168.98.0/25",
    "publicnet" : "192.168.98.128/25",
+   "availzone" : "us-east-1d",
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22

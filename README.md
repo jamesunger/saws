@@ -15,12 +15,13 @@ NOTE: This is a very, very early WIP. I wouldn't use it for anything. :)
 A JSON config file provides EC2 and other service information.
 
 Four simple commands exist now:
-1.  saws -a create
-2.  saws -a destroy
-3.  saws -a package
-4.  saws -a push
-5.  saws -a stop
-6.  saws -a start
+
+1. saws -a create
+2. saws -a destroy
+3. saws -a package
+4. saws -a push
+5. saws -a stop
+6. saws -a start
 
 Create creates any services (e.g., EC2 nodes) defined in JSON.
 
@@ -36,6 +37,7 @@ saws.json
 ---------
 
 The saws.json file defines the VPC and associated AWS services and is the only configuration input for <code>saws</code>. Saws expects to find the saws.json (or specifically overloaded via -c) file in the current directory along with the associated scripts and data used to initialize the nodes.
+
 
 Example
 -------
@@ -55,8 +57,12 @@ Created i-1c3303cf
 External IP:  52.7.11.206
 </pre>
 
-Now you can login to the 'salt' demo node and access all nodes on the VPC as well configure them using Salt.
+Now you can login to the 'salt' demo node which has an external ip:
+<pre>
+ssh -i /path/to/sshkey admin@52.2.198.199
+</pre>
 
+We can start using salt right away since the hosts should know about each other:
 <pre>
 root@salt:/home/admin# salt-key -L
 Accepted Keys:
@@ -76,11 +82,11 @@ wintest1:
     ----------
     os:
         Windows
-debiantest2:
+debiantest1:
     ----------
     os:
         Debian
-debiantest1:
+debiantest2:
     ----------
     os:
         Debian

@@ -31,6 +31,7 @@ type Config struct {
 	PrivateSubnetID string `json:privatesubnetid`
 	PublicSubnetID string `json:publicsubnetid`
 	AllSecurityGroups []SecurityGroup `json:allsecuritygroups`
+	AvailZone string `json:availzone`
 }
 
 type SecurityGroup struct {
@@ -178,7 +179,7 @@ func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 	}
 
 
-	fmt.Println("waiting for instance to leave state ", state)
+	//fmt.Println("waiting for instance to leave state", state)
 	//fmt.Println(dio)
 	count := 0
 	for {
@@ -219,7 +220,7 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 	}
 
 
-	fmt.Println("waiting for non pending state...")
+	//fmt.Println("waiting for non pending state...")
 	//fmt.Println(dio)
 	count := 0
 	for {
@@ -280,7 +281,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		fmt.Println("Failed to create instance",err)
 		fmt.Println(rres)
 	} else {
-		fmt.Println("Created ", *rres.Instances[0].InstanceID)
+		fmt.Println("Created", *rres.Instances[0].InstanceID)
 		//fmt.Println(rres)
 
 		//fmt.Println("Sleeping for a sec to give AWS some time ...")
@@ -351,10 +352,10 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 			if err != nil {
 				routeid,err = createPrivateRouteTable(svc, config)
 			} else {
-				err = deleteDefaultRoute(svc,routeid)
-				if err != nil {
+				_ = deleteDefaultRoute(svc,routeid)
+				/*if err != nil {
 					fmt.Println("Error deleting default route or default route existed", err)
-				}
+				}*/
 			}
 
 			defr := "0.0.0.0/0"
@@ -632,9 +633,13 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 func createSubnets(svc *ec2.EC2, config *Config) (*ec2.CreateSubnetOutput, *ec2.CreateSubnetOutput, error) {
 
 
-	//useast1d := "us-east-1d"
-	//csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &useast1d }
-	csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
+	var csi *ec2.CreateSubnetInput
+	if config.AvailZone != "" {
+		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID, AvailabilityZone: &config.AvailZone }
+	} else {
+		csi = &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
+	}
+	//csi := &ec2.CreateSubnetInput{ CIDRBlock: &config.PublicNet, VPCID: &config.VPCID }
 	cso1,err := svc.CreateSubnet(csi)
 	if err != nil {
 		fmt.Println("Create public subnet failed")
@@ -861,7 +866,7 @@ func Create(config *Config) {
 
 	//fmt.Println("Creating with", config)
 	for i := range config.EC2 {
-		fmt.Println("Creating EC2 instance: ", config.EC2[i].Name)
+		fmt.Println("Creating EC2 instance:", config.EC2[i].Name)
 		//fmt.Println(config.EC2[i].InstanceType)
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
@@ -878,7 +883,7 @@ func Create(config *Config) {
 
 
 		if !exists {
-			fmt.Println("No instance found, creating...")
+			//fmt.Println("No instance found, creating...")
 			var userdata string
 			if config.EC2[i].InitialConfig == "" {
 				userdata = getUserData(config.InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
@@ -916,9 +921,18 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 	}
 
 	for i := range dao.Addresses {
-		//fmt.Println(dao.Addresses[i])
+		//fmt.Println("Address ",dao.Addresses[i])
+
+		dai := &ec2.DisassociateAddressInput{ AssociationID: dao.Addresses[i].AssociationID }
+		daio,err := svc.DisassociateAddress(dai)
+		fmt.Println(daio)
+		if err != nil {
+			return err
+		}
+
 		rai := &ec2.ReleaseAddressInput{ AllocationID: dao.Addresses[i].AllocationID }
-		_,err := svc.ReleaseAddress(rai)
+		_,err = svc.ReleaseAddress(rai)
+		//fmt.Println(rao)
 		if err != nil {
 			return err
 		}
@@ -942,6 +956,14 @@ func Destroy(config *Config) {
 				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
 				fmt.Println("Instance will be terminated: ", *instances[k].InstanceID)
+				if config.EC2[i].HasExternalIP {
+					//fmt.Println("Has external IP")
+					//waitForNonXState(svc, instances[k].InstanceID, "shutting-down")
+					err := releaseExternalIP(svc, *instances[k].InstanceID)
+					if err != nil {
+						fmt.Println("Failed to release ip: ", err)
+					}
+				}
 
 				instanceids := []*string{ instances[k].InstanceID }
 				tii := ec2.TerminateInstancesInput { InstanceIDs: instanceids }
@@ -950,13 +972,6 @@ func Destroy(config *Config) {
 					panic(err)
 				}
 
-				if config.EC2[i].HasExternalIP {
-					waitForNonXState(svc, instances[k].InstanceID, "shutting-down")
-					err := releaseExternalIP(svc, *instances[k].InstanceID)
-					if err != nil {
-						fmt.Println("Failed to release ip: ", err)
-					}
-				}
 
 				fmt.Println("Terminated instance ", *instances[k].InstanceID)
 

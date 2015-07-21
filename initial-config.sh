@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo SAWS_HOSTNAME >>/etc/hostname
+echo SAWS_HOSTNAME >/etc/hostname
 hostname SAWS_HOSTNAME
 
 # sleep 30 seconds to give everything some time to settle...
@@ -42,6 +42,4 @@ if [[ "SAWS_HOSTNAME" == "salt" ]]; then
 else
 	apt-get update
         apt-get -y --force-yes install salt-minion
-	echo "id: SAWS_HOSTNAME" >>/etc/salt/minion
-	/etc/init.d/salt-minion restart
 fi
