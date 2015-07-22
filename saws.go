@@ -334,7 +334,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		fmt.Println("Failed to create instance",err)
 		fmt.Println(rres)
 	} else {
-		fmt.Println("Created", *rres.Instances[0].InstanceID)
+		fmt.Printf("Created instance %s: %s\n", ec2config.Name, *rres.Instances[0].InstanceID)
 		//fmt.Println(rres)
 
 		//fmt.Println("Sleeping for a sec to give AWS some time ...")
@@ -705,9 +705,8 @@ func createSecurityGroups(c *ec2.EC2, config *Config) error {
 			csgo,err := c.CreateSecurityGroup(csgi)
 			//fmt.Println(err)
 			if err != nil {
-				fmt.Println("Failed to create security group.")
-				fmt.Println(err)
 				if !strings.Contains(fmt.Sprintf("%s",err),"InvalidGroup.Duplicate") {
+					fmt.Println("Failed to create security group.")
 					return err
 				}
 				continue
@@ -845,7 +844,7 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 			vpc = dvo.VPCs[i]
 			vpcexists = true
 			config.VPCID = *dvo.VPCs[i].VPCID
-			fmt.Println("VPC already exists.")
+			//fmt.Println("VPC already exists.")
 		}
 	}
 
@@ -880,14 +879,14 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 		haspub := false
 		for i := range dso.Subnets {
 			if *dso.Subnets[i].CIDRBlock == config.PublicNet {
-				fmt.Println("Subnet for public VPC already exists.")
+				//fmt.Println("Subnet for public VPC already exists.")
 				config.PublicSubnetID = *dso.Subnets[i].SubnetID
 				haspub = true
 				continue
 			}
 
 			if *dso.Subnets[i].CIDRBlock == config.PrivateNet {
-				fmt.Println("Subnet for private VPC already exists.")
+				//fmt.Println("Subnet for private VPC already exists.")
 				config.PrivateSubnetID = *dso.Subnets[i].SubnetID
 				haspriv = true
 				continue
@@ -977,12 +976,20 @@ func Create(config *Config) {
 	for i := range config.RDS {
 		// setup RDS instances
 
+
+		_,err = getRDSInstanceById(rdsc,&config.RDS[i].DBInstanceIdentifier)
+		if err == nil {
+			fmt.Println("RDS instance", config.RDS[i].DBInstanceIdentifier, "exists.")
+			continue
+		}
+
+
 		groupname := "sawsdbprivate"
 		cdbsgi := &rds.CreateDBSubnetGroupInput{ DBSubnetGroupName: &groupname, SubnetIDs: []*string { &config.PrivateSubnetID, &config.PublicSubnetID }, DBSubnetGroupDescription: &groupname }
 		_,err := rdsc.CreateDBSubnetGroup(cdbsgi)
 		if err != nil {
 
-			fmt.Println("Failed to create db subnetgroup:", err)
+			//fmt.Println("Failed to create db subnetgroup:", err)
 			//FIXME: search for subnet gorup if already created
 			//panic(err)
 		}
@@ -1033,7 +1040,7 @@ func Create(config *Config) {
 
 	//fmt.Println("Creating with", config)
 	for i := range config.EC2 {
-		fmt.Println("Creating EC2 instance:", config.EC2[i].Name)
+		//fmt.Println("Creating EC2 instance:", config.EC2[i].Name)
 		//fmt.Println(config.EC2[i].InstanceType)
 
 		instances := getInstancesByName(svc,config.EC2[i].Name)
@@ -1043,7 +1050,7 @@ func Create(config *Config) {
 			if *instances[k].State.Name == "terminated" {
 				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
-				fmt.Println("Instance already exists: ", *instances[k].InstanceID)
+				fmt.Println("Instance",config.EC2[i].Name,"already exists:", *instances[k].InstanceID)
 				exists = true
 			}
 		}
@@ -1068,7 +1075,8 @@ func Create(config *Config) {
 		fmt.Println("Waiting for remaining", numStepsDeferred, "creation steps to complete...")
 		for i := 0; i < numStepsDeferred; i++ {
 			msg := <- doneChan
-			fmt.Printf("%d: %s\n", i, msg)
+			next := i + 1
+			fmt.Printf("%d: %s\n", next, msg)
 		}
 	}
 
@@ -1121,7 +1129,7 @@ func Destroy(config *Config) {
 	rdsc := rds.New(nil)
 
 	for i := range config.EC2 {
-		fmt.Println("Destroying EC2 instance: ", config.EC2[i].Name)
+		fmt.Println("Destroying EC2 instance:", config.EC2[i].Name)
 		//fmt.Println(config.EC2[i].InstanceType)
 
 
@@ -1130,7 +1138,7 @@ func Destroy(config *Config) {
 			if *instances[k].State.Name == "terminated" {
 				//fmt.Println("Instance is terminated:", *instances[k].InstanceID)
 			} else {
-				fmt.Println("Instance will be terminated: ", *instances[k].InstanceID)
+				//fmt.Println("Instance will be terminated:", *instances[k].InstanceID)
 				if config.EC2[i].HasExternalIP {
 					//fmt.Println("Has external IP")
 					//waitForNonXState(svc, instances[k].InstanceID, "shutting-down")
@@ -1148,7 +1156,7 @@ func Destroy(config *Config) {
 				}
 
 
-				fmt.Println("Terminated instance ", *instances[k].InstanceID)
+				fmt.Println("Terminated instance", *instances[k].InstanceID)
 
 			}
 		}

@@ -62,6 +62,65 @@ Example
 -------
 <pre>
 $ ./saws -a create
+Created MySQL RDS instance:  someid
+Created instance salt: i-1b2e52b3
+Created instance debiantest1: i-cd2e141e
+Created instance debiantest2: i-462e1495
+Created instance wintest1: i-af2e5207
+Waiting for remaining 4 creation steps to complete...
+1: External IP for salt assigned: 52.2.47.184
+2: Configured for NAT: salt
+3: External IP for wintest1 assigned: 52.2.7.39
+4: Endpoint for RDS instance someid: someid.cqxtcggij89r.us-east-1.rds.amazonaws.com
+$ ssh -i ../tor-cloud-servers.pem admin@52.2.47.184
+The authenticity of host '52.2.47.184 (52.2.47.184)' can't be established.
+ECDSA key fingerprint is d4:09:7c:60:95:9d:94:57:a2:7b:fb:87:76:3c:ba:ee.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '52.2.47.184' (ECDSA) to the list of known hosts.
+Linux ip-192-168-98-147 3.2.0-4-amd64 #1 SMP Debian 3.2.65-1+deb7u1 x86_64
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+admin@salt:~$ sudo su
+root@salt:/home/admin# salt-key -A -y
+The following keys are going to be accepted:
+Unaccepted Keys:
+debiantest1
+debiantest2
+wintest1
+Key for minion debiantest1 accepted.
+Key for minion debiantest2 accepted.
+Key for minion wintest1 accepted.
+root@salt:/home/admin# salt '*' grains.item os
+wintest1:
+    ----------
+    os:
+        Windows
+debiantest1:
+    ----------
+    os:
+        Debian
+debiantest2:
+    ----------
+    os:
+        Debian
+</pre>
+
+
+
+
+
+
+
+
+
+
+
+
+<pre>
+$ ./saws -a create
 Created new VPC: vpc-35b7a950
 Creating EC2 instance: salt
 Created i-70586aa3
