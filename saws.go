@@ -47,7 +47,7 @@ type RDS struct {
 	Engine string `json:engine`
 	EngineVersion string `json:engineversion`
 	MasterUserPassword string `json:masteruserpassword`
-	MasterUsername string `json:MasterUsername`
+	MasterUsername string `json:masterusername`
 }
 
 type SecurityGroup struct {
@@ -269,13 +269,14 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 
 }
 
-func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string) {
+func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string, doneChan chan string) int {
 	var min int64
 	var max int64
 	min = 1
 	max = 1
 
 
+	remainingSteps := 0
 
 	var subnet string
 	if ec2config.HasExternalIP {
@@ -328,68 +329,86 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 			fmt.Println(err)
 		} //else {
 			//fmt.Println("Created tag Name with value", ec2config.Name)
-		//}
+		//fmt.Println("isnat", ec2config.IsNat)
+		if ec2config.IsNat {
+			remainingSteps++
+
+
+			go func() {
+
+				err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
+				if err != nil {
+					fmt.Println(err)
+					doneChan <- "Gave up waiting on ec2 to leave pending state."
+					return
+				}
+
+				bv := false
+				abv := &ec2.AttributeBooleanValue{ Value: &bv }
+				miai := &ec2.ModifyInstanceAttributeInput{ InstanceID: rres.Instances[0].InstanceID, SourceDestCheck: abv }
+				_,err := svc.ModifyInstanceAttribute(miai)
+				if err != nil {
+					fmt.Println("Failed to change sourcedestcheck", err)
+				}
+
+				routeid,err := getPrivateRouteTable(svc, &config.PrivateSubnetID, config.VPCID)
+				if err != nil {
+					routeid,err = createPrivateRouteTable(svc, config)
+				} else {
+					_ = deleteDefaultRoute(svc,routeid)
+					/*if err != nil {
+						fmt.Println("Error deleting default route or default route existed", err)
+					}*/
+				}
+
+				defr := "0.0.0.0/0"
+				cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defr, InstanceID: rres.Instances[0].InstanceID, RouteTableID: routeid }
+				_,err = svc.CreateRoute(cri)
+				if err != nil {
+					fmt.Println("Error adding new default route to NAT node", err)
+				}
+				doneChan <- fmt.Sprintf("Configured for NAT: %s", ec2config.Name)
+			}()
+
+		}
+	//}
 
 
 		//fmt.Println("hasexternalip ", ec2config.HasExternalIP)
 		if ec2config.HasExternalIP {
-			vpcs := "vpc"
-			aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
-			if err != nil {
-				fmt.Println("Could not allocate addr:", err)
-			}
-
-			//fmt.Println(aao)
+			remainingSteps++
 
 
-			err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
-			if err != nil {
-				fmt.Println(err)
-			} else {
-				//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
-				_,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+			go func() {
+				vpcs := "vpc"
+				aao,err := svc.AllocateAddress(&ec2.AllocateAddressInput{ Domain: &vpcs })
 				if err != nil {
-					fmt.Println("Could not assign addr:", err)
+					fmt.Println("Could not allocate addr:", err)
 				}
 
-				//fmt.Println(aai)
-			}
 
-			fmt.Println("External IP: ", *aao.PublicIP)
+
+				err = waitForNonPendingState(svc, rres.Instances[0].InstanceID)
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					//aai,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ PublicIP: aao.PublicIP, InstanceID: rres.Instances[0].InstanceID })
+					_,err := svc.AssociateAddress(&ec2.AssociateAddressInput{ AllocationID: aao.AllocationID, InstanceID: rres.Instances[0].InstanceID })
+					if err != nil {
+						fmt.Println("Could not assign addr:", err)
+					}
+				}
+
+				//fmt.Println("External IP: ", *aao.PublicIP)
+				doneChan <- fmt.Sprintf("External IP for %s assigned: %s", ec2config.Name, *aao.PublicIP)
+			}()
 
 		}
 
-		//fmt.Println("isnat", ec2config.IsNat)
-		if ec2config.IsNat {
-			bv := false
-			abv := &ec2.AttributeBooleanValue{ Value: &bv }
-			miai := &ec2.ModifyInstanceAttributeInput{ InstanceID: rres.Instances[0].InstanceID, SourceDestCheck: abv }
-			_,err := svc.ModifyInstanceAttribute(miai)
-			if err != nil {
-				fmt.Println("Failed to change sourcedestcheck", err)
-			}
-
-			routeid,err := getPrivateRouteTable(svc, &config.PrivateSubnetID, config.VPCID)
-			if err != nil {
-				routeid,err = createPrivateRouteTable(svc, config)
-			} else {
-				_ = deleteDefaultRoute(svc,routeid)
-				/*if err != nil {
-					fmt.Println("Error deleting default route or default route existed", err)
-				}*/
-			}
-
-			defr := "0.0.0.0/0"
-			cri := &ec2.CreateRouteInput{ DestinationCIDRBlock: &defr, InstanceID: rres.Instances[0].InstanceID, RouteTableID: routeid }
-			_,err = svc.CreateRoute(cri)
-			if err != nil {
-				fmt.Println("Error adding new default route to NAT node", err)
-			}
-
-			fmt.Println("Configured for NAT: ", *rres.Instances[0].InstanceID)
-		}
 
 	}
+
+	return remainingSteps
 
 }
 
@@ -921,18 +940,21 @@ func Create(config *Config) {
 		panic(err)
 	}
 
+	doneChan := make(chan string)
+	numStepsDeferred := 0
+
 	for i := range config.RDS {
 		// setup RDS instances
 
 		groupname := "sawsdbprivate"
 		cdbsgi := &rds.CreateDBSubnetGroupInput{ DBSubnetGroupName: &groupname, SubnetIDs: []*string { &config.PrivateSubnetID, &config.PublicSubnetID }, DBSubnetGroupDescription: &groupname }
-		cdsgo,err := rdsc.CreateDBSubnetGroup(cdbsgi)
+		_,err := rdsc.CreateDBSubnetGroup(cdbsgi)
 		if err != nil {
+
 			fmt.Println("Failed to create db subnetgroup:", err)
 			//FIXME: search for subnet gorup if already created
-			panic(err)
+			//panic(err)
 		}
-		//fmt.Println(cdsgo)
 
 		/*
 		fmt.Println("Creating with:", config.RDS[i])
@@ -947,7 +969,7 @@ func Create(config *Config) {
 		*/
 
 		cdbi := &rds.CreateDBInstanceInput{
-				DBSubnetGroupName: cdsgo.DBSubnetGroup.DBSubnetGroupName,
+				DBSubnetGroupName: &groupname,
 				Engine: &config.RDS[i].Engine,
 				DBName: &config.RDS[i].DBName,
 				DBInstanceIdentifier: &config.RDS[i].DBInstanceIdentifier,
@@ -991,18 +1013,21 @@ func Create(config *Config) {
 			} else {
 				userdata = getUserData(config.EC2[i].InitialConfig,config.S3Bucket,config.EC2[i].Name, config.VPC)
 			}
-			createInstance(svc, config, config.EC2[i], userdata)
+			numsteps := createInstance(svc, config, config.EC2[i], userdata, doneChan)
+			numStepsDeferred += numsteps
 		}
 
 	}
 
 
+	if numStepsDeferred != 0 {
+		fmt.Println("Waiting for remaining creation steps to complete...")
+		for i := 0; i < numStepsDeferred; i++ {
+			msg := <- doneChan
+			fmt.Println(msg)
+		}
+	}
 
-	//if len(config.RDS) > 0 {
-	//	fmt.Println("Waiting for 
-	//}
-	//jsonInstanceInfo := getJsonInstanceInfo(config)
-	//fmt.Println(jsonInstanceInfo)
 	err = sendSawsInfo(config)
 	if err != nil {
 		panic(err)
