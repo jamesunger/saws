@@ -229,6 +229,37 @@ func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 
 }
 
+func waitForRDSEndpoint(rds *rds.RDS, dbid *string) (*rds.DBInstance, error) {
+	count := 0
+	rdsinst,err := getRDSInstanceById(rds,dbid)
+	if err != nil {
+		return nil,err
+	}
+
+	for {
+		if count > 300 {
+			break
+		}
+		//fmt.Println(rdsinst)
+		rdsinst,err = getRDSInstanceById(rds,dbid)
+
+		if err != nil {
+			return nil,err
+		}
+
+		if rdsinst.Endpoint != nil {
+			return rdsinst,nil
+		} else {
+			//fmt.Println(count)
+			count++
+		}
+		time.Sleep(2*time.Second)
+
+	}
+
+	return nil,errors.New("Waited too long for RDS endpoint to come online.")
+}
+
 func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 	iids := []*string{ instanceid }
 	dii := &ec2.DescribeInstancesInput {
@@ -466,8 +497,8 @@ func getInstancesByName(svc *ec2.EC2, tag string) []*ec2.Instance {
 
 }
 
-func getRDSInstanceById(rdsc *rds.RDS, rdsconf *RDS) (*rds.DBInstance,error) {
-	ddbii := &rds.DescribeDBInstancesInput{ DBInstanceIdentifier: &rdsconf.DBInstanceIdentifier }
+func getRDSInstanceById(rdsc *rds.RDS, rdsid *string) (*rds.DBInstance,error) {
+	ddbii := &rds.DescribeDBInstancesInput{ DBInstanceIdentifier: rdsid }
 	ddbo, err := rdsc.DescribeDBInstances(ddbii)
 	if err != nil {
 		return nil,err
@@ -492,7 +523,7 @@ func getJsonSawsInfo(config *Config) []byte {
 	rdslist := make([]*rds.DBInstance,0)
 	for i := range config.RDS {
 		//fmt.Println(config.RDS[i].DBInstanceIdentifier)
-		dbinstance,err := getRDSInstanceById(rdsc,&config.RDS[i])
+		dbinstance,err := getRDSInstanceById(rdsc,&config.RDS[i].DBInstanceIdentifier)
 		if err != nil {
 			//fmt.Println("Failed to find db instance", config.RDS[i].DBInstanceIdentifier)
 		} else {
@@ -985,6 +1016,19 @@ func Create(config *Config) {
 		}
 		//fmt.Println(cdbo)
 		fmt.Println("Created", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
+
+
+		numStepsDeferred++
+		go func() {
+			rdsinst,err := waitForRDSEndpoint(rdsc,&config.RDS[i].DBInstanceIdentifier)
+			if err != nil {
+				fmt.Println(err)
+			} else {
+				doneChan <- fmt.Sprintf("Endpoint for RDS instance %s: %s", config.RDS[i].DBInstanceIdentifier, *rdsinst.Endpoint.Address)
+			}
+		}()
+
+
 	}
 
 	//fmt.Println("Creating with", config)
@@ -1021,10 +1065,10 @@ func Create(config *Config) {
 
 
 	if numStepsDeferred != 0 {
-		fmt.Println("Waiting for remaining creation steps to complete...")
+		fmt.Println("Waiting for remaining", numStepsDeferred, "creation steps to complete...")
 		for i := 0; i < numStepsDeferred; i++ {
 			msg := <- doneChan
-			fmt.Println(msg)
+			fmt.Printf("%d: %s\n", i, msg)
 		}
 	}
 

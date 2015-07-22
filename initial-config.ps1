@@ -6,7 +6,19 @@ Start-Sleep -s 30
 
 Set-AWSCredentials -AccessKey SAWS_ACCESS_KEY -SecretKey SAWS_SECRET_KEY
 Read-S3Object -BucketName SAWS_S3BUCKET -Key package.zip -File C:\package.zip
-Read-S3Object -BucketName SAWS_S3BUCKET -Key saws-info.json -File C:\saws-info.json
+
+$stillfailed = ""
+while ($stillfailed -eq "") {
+	try {
+	  Read-S3Object -BucketName SAWS_S3BUCKET -Key saws-info.json -File C:\saws-info.json
+	} catch {
+	    echo "Waiting..."
+	    Start-Sleep -s 5
+	    continue
+	}
+	
+	$stillfailed = "there"
+}
 
 mkdir C:\saws-package
 [System.Reflection.Assembly]::LoadWithPartialName("System.IO.Compression.FileSystem")
