@@ -123,6 +123,42 @@ func parseConfig(configfile string) *Config {
 	return config
 }
 
+type rateLimitUploader struct {
+   fh     *os.File
+   slice []byte    // Buffer of unread data.
+   tmp   [256]byte // Storage for slice.
+   count int
+}
+
+func (f *rateLimitUploader) Read(p []byte) (int, error) {
+
+      f.count++
+
+      if len(p) == 0 {
+          return 0, nil
+      }
+      if len(f.slice) == 0 {
+	  mbytes := make([]byte,1024)
+          blockLen, err := f.fh.Read(mbytes)
+          if err != nil {
+              return 0, err
+          }
+          if blockLen == 0 {
+              return 0, io.EOF
+          }
+          f.slice = mbytes[0:blockLen]
+          /*if _, err = io.ReadFull(f.fh, f.slice); err != nil {
+	      fmt.Println("All done")
+              return 0, io.EOF
+          }*/
+      }
+      n := copy(p, f.slice)
+      fmt.Println("Chunk...",f.count)
+      time.Sleep(1*time.Millisecond)
+      f.slice = f.slice[n:]
+      return n, nil
+}
+
 func uploadPackage(config *Config) error {
 	key := "package.zip"
 	uploadfile, err := os.Open(key)
@@ -130,11 +166,14 @@ func uploadPackage(config *Config) error {
 		return err
 	}
 
+	//rlu := &rateLimitUploader{ fh: uploadfile }
+
 	fmt.Println("Uploading package.zip to", config.S3Bucket, "bucket...")
 	uploader := s3manager.NewUploader(nil)
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: &config.S3Bucket,
 		Key:    &key,
+		//Body:   rlu,
 		Body:   uploadfile,
 	})
 
@@ -253,7 +292,7 @@ func waitForRDSEndpoint(rds *rds.RDS, dbid *string) (*rds.DBInstance, error) {
 			//fmt.Println(count)
 			count++
 		}
-		time.Sleep(2*time.Second)
+		time.Sleep(5*time.Second)
 
 	}
 
@@ -1030,6 +1069,7 @@ func Create(config *Config) {
 			rdsinst,err := waitForRDSEndpoint(rdsc,&config.RDS[i].DBInstanceIdentifier)
 			if err != nil {
 				fmt.Println(err)
+				doneChan <- fmt.Sprint(err)
 			} else {
 				doneChan <- fmt.Sprintf("Endpoint for RDS instance %s: %s", config.RDS[i].DBInstanceIdentifier, *rdsinst.Endpoint.Address)
 			}
