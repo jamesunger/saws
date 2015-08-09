@@ -58,5 +58,18 @@
 		"masterusername": "mysqlroot",
 		"masteruserpassword": "ibai3ah85"
 	}
-   ]
+   ],
+
+  "elb" : [
+	{
+	  "name": "testlb",
+	  "instanceport": 80,
+	  "elbport": 80,
+	  "protocol": "HTTP",
+          "instances" : [
+		"debiantest1",
+		"debiantest2"
+	  ]
+	}
+  ]
 }

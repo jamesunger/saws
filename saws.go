@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"io"
 	"io/ioutil"
@@ -35,6 +36,7 @@ type Config struct {
 	AvailZone1 string `json:availzone1`
 	AvailZone2 string `json:availzone2`
 	RDS []RDS `json:rds`
+	ELB []ELB `json:elb`
 }
 
 type RDS struct {
@@ -62,10 +64,19 @@ type EC2 struct {
 	AMI string `json:ami`
 	KeyName string `json:keyname`
 	SubnetID string `json:subnetid`
+	InstanceID string `json:instanceid`
 	SecurityGroupIDs []*string `json:securitygroupids`
 	SecurityGroups []string `json:securitygroups`
 	HasExternalIP bool `json:hasexternalip`
 	IsNat bool `json:isnat`
+}
+
+type ELB struct {
+	Name string `json:name`
+	InstancePort int64 `json:instanceport`
+	LoadBalancerPort int64 `json:instanceport`
+	Instances []string `json:instances`
+	Protocol string `json:protocol`
 }
 
 type SawsInfo struct {
@@ -374,6 +385,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		fmt.Println(rres)
 	} else {
 		fmt.Printf("Created instance %s: %s\n", ec2config.Name, *rres.Instances[0].InstanceID)
+		ec2config.InstanceID = *rres.Instances[0].InstanceID
 		//fmt.Println(rres)
 
 		//fmt.Println("Sleeping for a sec to give AWS some time ...")
@@ -899,7 +911,7 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 		}
 
 		/*
-		sgids := getSecurityGroupIDs(c,config, BOOK
+		sgids := getSecurityGroupIDs(c,config, 
 		err = applySecurityGroups(c, config)
 		if err != nil {
 			fmt.Println("Failed to apply security groups.")
@@ -996,6 +1008,7 @@ func Create(config *Config) {
 
 	svc := ec2.New(nil)
 	rdsc := rds.New(nil)
+	elbc := elb.New(nil)
 
 	err := verifyAndCreateVPC(svc,config)
 	if err != nil {
@@ -1012,6 +1025,8 @@ func Create(config *Config) {
 	doneChan := make(chan string)
 	numStepsDeferred := 0
 
+
+	// Creat RDS
 	for i := range config.RDS {
 		// setup RDS instances
 
@@ -1033,17 +1048,15 @@ func Create(config *Config) {
 			//panic(err)
 		}
 
-		/*
-		fmt.Println("Creating with:", config.RDS[i])
-		fmt.Println("DBSubnetGroupName: ", cdsgo.DBSubnetGroup.DBSubnetGroupName)
-		fmt.Println("Engine: ", config.RDS[i].Engine)
-		fmt.Println("DBName: ", config.RDS[i].DBName)
-		fmt.Println("DBInstanceIdentifier: ", config.RDS[i].DBInstanceIdentifier)
-		fmt.Println("AllocatedStorage: ", config.RDS[i].AllocatedStorage)
-		fmt.Println("DBInstanceClass: ", config.RDS[i].DBInstanceClass)
-		fmt.Println("MasterUsername: ", config.RDS[i].MasterUsername)
-		fmt.Println("MasterUserPassword: ", config.RDS[i].MasterUserPassword)
-		*/
+		//fmt.Println("Creating with:", config.RDS[i])
+		//fmt.Println("DBSubnetGroupName: ", cdsgo.DBSubnetGroup.DBSubnetGroupName)
+		//fmt.Println("Engine: ", config.RDS[i].Engine)
+		//fmt.Println("DBName: ", config.RDS[i].DBName)
+		//fmt.Println("DBInstanceIdentifier: ", config.RDS[i].DBInstanceIdentifier)
+		//fmt.Println("AllocatedStorage: ", config.RDS[i].AllocatedStorage)
+		//fmt.Println("DBInstanceClass: ", config.RDS[i].DBInstanceClass)
+		//fmt.Println("MasterUsername: ", config.RDS[i].MasterUsername)
+		//fmt.Println("MasterUserPassword: ", config.RDS[i].MasterUserPassword)
 
 		cdbi := &rds.CreateDBInstanceInput{
 				DBSubnetGroupName: &groupname,
@@ -1078,7 +1091,8 @@ func Create(config *Config) {
 
 	}
 
-	//fmt.Println("Creating with", config)
+
+	// Creat EC2
 	for i := range config.EC2 {
 		//fmt.Println("Creating EC2 instance:", config.EC2[i].Name)
 		//fmt.Println(config.EC2[i].InstanceType)
@@ -1110,6 +1124,37 @@ func Create(config *Config) {
 
 	}
 
+
+	// Create ELB
+	for i := range config.ELB {
+		fmt.Println("elbport ", config.ELB[i].InstancePort)
+		fmt.Println("instanceport ", config.ELB[i].InstancePort)
+		listn := &elb.Listener{InstancePort: &config.ELB[i].InstancePort, InstanceProtocol: &config.ELB[i].Protocol, Protocol: &config.ELB[i].Protocol, LoadBalancerPort: &config.ELB[i].InstancePort}
+		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PrivateSubnetID, &config.PublicSubnetID } }
+		clbo, err := elbc.CreateLoadBalancer(clbi)
+		if err != nil {
+			fmt.Println("Failed to create elb:", err)
+		}
+		fmt.Println("Created elb:", *clbo.DNSName)
+
+
+		instances := []*elb.Instance{}
+		for k := range config.ELB[i].Instances {
+			validInstances := getInstancesByName(svc,config.ELB[i].Instances[k])
+			fmt.Println(validInstances)
+			if len(validInstances) >= 1 && *instances[k].State.Name != "terminated" {
+				instance := &elb.Instance{ InstanceID: validInstances[0].InstanceID}
+				instances = append(instances, instance)
+			}
+		}
+		
+		riwlbi := &elb.RegisterInstancesWithLoadBalancerInput{ LoadBalancerName: &config.ELB[i].Name, Instances: instances }
+		_, err = elbc.RegisterInstancesWithLoadBalancer(riwlbi)
+		if err != nil {
+			fmt.Println("Failed to register instances with elb:", err)
+		}
+
+	}
 
 	if numStepsDeferred != 0 {
 		fmt.Println("Waiting for remaining", numStepsDeferred, "creation steps to complete...")
