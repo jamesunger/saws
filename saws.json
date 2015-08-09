@@ -69,7 +69,7 @@
 	  "instanceport": 80,
 	  "elbport": 80,
 	  "protocol": "HTTP",
-	  "securitygroups" : [ "http" ],
+	  "securitygroups" : [ "default", "http" ],
           "instances" : [
 		"debiantest1",
 		"debiantest2"
