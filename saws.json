@@ -12,6 +12,9 @@
 			},
 			{ "name": "rdp",
 			  "tcpport": 3389 
+			},
+			{ "name": "http",
+			  "tcpport": 80
 			}
 			 ],
    "ec2" : [
@@ -29,19 +32,19 @@
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "securitygroups" : [ "default", "ssh" ]
+	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
          "instancetype" : "t1.micro",
          "name" : "debiantest2",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "securitygroups" : [ "default", "ssh" ]
+	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
          "instancetype" : "t2.micro",
          "name" : "wintest1",
-         "ami" : "ami-5b9e6b30",
+         "ami" : "ami-850adbee",
          "keyname" : "tor-cloud-servers",
 	 "initialconfig" : "initial-config.ps1",
 	 "hasexternalip" : true,
@@ -66,6 +69,7 @@
 	  "instanceport": 80,
 	  "elbport": 80,
 	  "protocol": "HTTP",
+	  "securitygroups" : [ "http" ],
           "instances" : [
 		"debiantest1",
 		"debiantest2"

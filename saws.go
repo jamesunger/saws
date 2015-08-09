@@ -77,6 +77,7 @@ type ELB struct {
 	LoadBalancerPort int64 `json:instanceport`
 	Instances []string `json:instances`
 	Protocol string `json:protocol`
+	SecurityGroups []string `json:securitygroups`
 }
 
 type SawsInfo struct {
@@ -366,7 +367,7 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 		subnet = config.PrivateSubnetID
 	}
 
-	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, &ec2config)
+	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, ec2config.SecurityGroups)
 	params := &ec2.RunInstancesInput{
 		ImageID:      &ec2config.AMI,
 		InstanceType: &ec2config.InstanceType,
@@ -840,19 +841,18 @@ func createPrivateRouteTable(svc *ec2.EC2, config *Config) (*string, error) {
 
 }
 
-func getSecurityGroupIDs(c *ec2.EC2, config *Config, inst *EC2) ([]*string) {
+func getSecurityGroupIDs(c *ec2.EC2, config *Config, secgroups []string) ([]*string) {
 
 
 	//secgroups := make([]*string,0)
 	secgroupids := make([]*string,0)
-	for i := range inst.SecurityGroups {
+	for i := range secgroups {
 		filters := make([]*ec2.Filter,0)
-		//secgroups = append(secgroups,&inst.SecurityGroups[i])
 
 		keyname := "group-name"
 		keyname2 := "vpc-id"
 		filter := ec2.Filter{
-			Name: &keyname, Values: []*string{ &inst.SecurityGroups[i] } }
+			Name: &keyname, Values: []*string{ &secgroups[i] } }
 		filter2 := ec2.Filter{
 			Name: &keyname2, Values: []*string{ &config.VPCID } }
 		filters = append(filters,&filter)
@@ -1127,10 +1127,11 @@ func Create(config *Config) {
 
 	// Create ELB
 	for i := range config.ELB {
-		fmt.Println("elbport ", config.ELB[i].InstancePort)
-		fmt.Println("instanceport ", config.ELB[i].InstancePort)
+		//fmt.Println("elbport ", config.ELB[i].InstancePort)
+		//fmt.Println("instanceport ", config.ELB[i].InstancePort)
+		secgroupids := getSecurityGroupIDs(svc, config, config.ELB[i].SecurityGroups)
 		listn := &elb.Listener{InstancePort: &config.ELB[i].InstancePort, InstanceProtocol: &config.ELB[i].Protocol, Protocol: &config.ELB[i].Protocol, LoadBalancerPort: &config.ELB[i].InstancePort}
-		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PrivateSubnetID, &config.PublicSubnetID } }
+		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PrivateSubnetID, &config.PublicSubnetID }, SecurityGroups: secgroupids }
 		clbo, err := elbc.CreateLoadBalancer(clbi)
 		if err != nil {
 			fmt.Println("Failed to create elb:", err)
@@ -1141,10 +1142,12 @@ func Create(config *Config) {
 		instances := []*elb.Instance{}
 		for k := range config.ELB[i].Instances {
 			validInstances := getInstancesByName(svc,config.ELB[i].Instances[k])
-			fmt.Println(validInstances)
-			if len(validInstances) >= 1 && *instances[k].State.Name != "terminated" {
-				instance := &elb.Instance{ InstanceID: validInstances[0].InstanceID}
-				instances = append(instances, instance)
+			//fmt.Println(validInstances)
+			for j := range validInstances {
+				if *validInstances[j].State.Name != "terminated" {
+					instance := &elb.Instance{ InstanceID: validInstances[j].InstanceID}
+					instances = append(instances, instance)
+				}
 			}
 		}
 		
@@ -1211,6 +1214,7 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 func Destroy(config *Config) {
 	//fmt.Println("Destroy not implemented")
 	svc := ec2.New(nil)
+	elbc := elb.New(nil)
 	rdsc := rds.New(nil)
 
 	for i := range config.EC2 {
@@ -1258,17 +1262,17 @@ func Destroy(config *Config) {
 		//fmt.Println(ddbo)
 		fmt.Println("Destroyed", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
 	}
-	/*
-	for i := range config.RDS {
-		ddbii := &rds.DescribeDBInstancesInput{ DBInstanceIdentifier: config.RDS[i].DBInstanceIdentifier }
-		ddbo,err := rdsc.DescribeDBInstances(ddbii)
+
+
+	for i := range config.ELB {
+		dlbi := &elb.DeleteLoadBalancerInput{ LoadBalancerName: &config.ELB[i].Name }
+		_,err := elbc.DeleteLoadBalancer(dlbi)
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to delete load balancer:", err)
+		} else {
+			fmt.Println("Destroyed load balancer:", config.ELB[i].Name)
 		}
-
-
 	}
-	*/
 
 	fmt.Println("Everything but the VPC destroyed.")
 

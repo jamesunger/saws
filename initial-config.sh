@@ -42,4 +42,7 @@ if [[ "SAWS_HOSTNAME" == "salt" ]]; then
 else
 	apt-get update
         apt-get -y --force-yes install salt-minion
+	sudo apt-get -y install nginx
+	sudo service nginx start
 fi
+
