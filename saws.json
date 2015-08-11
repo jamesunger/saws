@@ -6,6 +6,7 @@
    "publicnet" : "192.168.98.128/25",
    "availzone1" : "us-east-1c",
    "availzone2" : "us-east-1d",
+   "destroypolicy" : "nuke",
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22
@@ -32,6 +33,7 @@
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
+	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
@@ -39,6 +41,7 @@
          "name" : "debiantest2",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
+	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
@@ -47,7 +50,6 @@
          "ami" : "ami-850adbee",
          "keyname" : "tor-cloud-servers",
 	 "initialconfig" : "initial-config.ps1",
-	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "rdp" ]
       }
    ],
@@ -67,7 +69,6 @@
 	{
 	  "name": "testlb",
 	  "instanceport": 80,
-	  "elbport": 80,
 	  "protocol": "HTTP",
 	  "securitygroups" : [ "default", "http" ],
           "instances" : [

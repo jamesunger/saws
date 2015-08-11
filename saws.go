@@ -27,6 +27,7 @@ type Config struct {
 	EC2      []EC2  `json:ec2`
 	InitialConfig     string  `json:initialconfig`
 	VPC string `json:vpc`
+	DestroyPolicy string `json:destroypolicy`
 	PrivateNet string `json:privatenet`
 	PublicNet string `json:publicnet`
 	VPCID string `json:vpcid`
@@ -841,7 +842,56 @@ func createPrivateRouteTable(svc *ec2.EC2, config *Config) (*string, error) {
 
 }
 
-func getSecurityGroupIDs(c *ec2.EC2, config *Config, secgroups []string) ([]*string) {
+func getGatewayIDs (c *ec2.EC2, vpcid string) ([]string,error) {
+	gatewayids := []string{}
+
+	filters := make([]*ec2.Filter,0)
+	keyname := "attachment.vpc-id"
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ &vpcid } }
+	filters = append(filters,&filter)
+
+	digi := &ec2.DescribeInternetGatewaysInput{ Filters: filters }
+	digo,err := c.DescribeInternetGateways(digi)
+	if err != nil {
+		return gatewayids,err
+	}
+
+	for i := range digo.InternetGateways {
+		gatewayids = append(gatewayids, *digo.InternetGateways[i].InternetGatewayID)
+	}
+	return gatewayids,nil
+}
+
+func getSecurityGroupIDsByVPC(c *ec2.EC2, vpcid string) []*string {
+	secgroupids := make([]*string,0)
+	filters := make([]*ec2.Filter,0)
+	keyname := "vpc-id"
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ &vpcid } }
+	filters = append(filters,&filter)
+
+	dsgi := &ec2.DescribeSecurityGroupsInput{ Filters: filters }
+	dsgo,err := c.DescribeSecurityGroups(dsgi)
+	if err != nil {
+		fmt.Println("Describe security groups failed.")
+		panic(err)
+	}
+
+	for i := range dsgo.SecurityGroups {
+		if *dsgo.SecurityGroups[i].GroupName == "default" {
+			continue
+		} else {
+			secgroupids = append(secgroupids,dsgo.SecurityGroups[i].GroupID)
+		}
+	}
+
+
+        return secgroupids
+
+}
+
+func getSecurityGroupIDs(c *ec2.EC2, config *Config, secgroups []string) []*string {
 
 
 	//secgroups := make([]*string,0)
@@ -1070,7 +1120,7 @@ func Create(config *Config) {
 		}
 		_, err = rdsc.CreateDBInstance(cdbi)
 		if err != nil {
-			fmt.Println("Error creating db instance:",err)
+			fmt.Println("Error creating db instance.")
 			panic(err)
 		}
 		//fmt.Println(cdbo)
@@ -1131,7 +1181,7 @@ func Create(config *Config) {
 		//fmt.Println("instanceport ", config.ELB[i].InstancePort)
 		secgroupids := getSecurityGroupIDs(svc, config, config.ELB[i].SecurityGroups)
 		listn := &elb.Listener{InstancePort: &config.ELB[i].InstancePort, InstanceProtocol: &config.ELB[i].Protocol, Protocol: &config.ELB[i].Protocol, LoadBalancerPort: &config.ELB[i].InstancePort}
-		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PrivateSubnetID, &config.PublicSubnetID }, SecurityGroups: secgroupids }
+		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PublicSubnetID, &config.PrivateSubnetID }, SecurityGroups: secgroupids }
 		clbo, err := elbc.CreateLoadBalancer(clbi)
 		if err != nil {
 			fmt.Println("Failed to create elb:", err)
@@ -1252,18 +1302,31 @@ func Destroy(config *Config) {
 	}
 
 
-	for i := range config.RDS {
-		abool := true
-		ddbi := &rds.DeleteDBInstanceInput{ DBInstanceIdentifier: &config.RDS[i].DBInstanceIdentifier, SkipFinalSnapshot: &abool }
-		_,err := rdsc.DeleteDBInstance(ddbi)
-		if err != nil {
-			fmt.Println("Error deleting instance:", err)
+	if config.DestroyPolicy == "nuke" {
+		for i := range config.RDS {
+			abool := true
+			ddbi := &rds.DeleteDBInstanceInput{ DBInstanceIdentifier: &config.RDS[i].DBInstanceIdentifier, SkipFinalSnapshot: &abool }
+			_,err := rdsc.DeleteDBInstance(ddbi)
+			if err != nil {
+				fmt.Println("Error deleting instance:", err)
+			}
+			//fmt.Println(ddbo)
+
+
+
+			groupname := "sawsdbprivate"
+			ddbsgi := &rds.DeleteDBSubnetGroupInput{ DBSubnetGroupName: &groupname }
+			_,err = rdsc.DeleteDBSubnetGroup(ddbsgi)
+			if err != nil {
+				fmt.Println("Failed to delete db subnetgroup:", err)
+			}
+
+
+			fmt.Println("Destroyed", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
 		}
-		//fmt.Println(ddbo)
-		fmt.Println("Destroyed", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
+	
 	}
-
-
+	
 	for i := range config.ELB {
 		dlbi := &elb.DeleteLoadBalancerInput{ LoadBalancerName: &config.ELB[i].Name }
 		_,err := elbc.DeleteLoadBalancer(dlbi)
@@ -1274,36 +1337,115 @@ func Destroy(config *Config) {
 		}
 	}
 
-	fmt.Println("Everything but the VPC destroyed.")
 
-	/*
-	dvi := &ec2.DescribeVPCsInput{}
-	dvo,err := svc.DescribeVPCs(dvi)
-	if err != nil {
-		panic(err)
-	}
-
-
-	//vpcid := ""
-	for i := range dvo.VPCs {
-		if *dvo.VPCs[i].CIDRBlock == config.VPC {
-			config.VPCID = *dvo.VPCs[i].VPCID
+	if config.DestroyPolicy == "nuke" {
+		dvi := &ec2.DescribeVPCsInput{}
+		dvo,err := svc.DescribeVPCs(dvi)
+		if err != nil {
+			panic(err)
 		}
+
+
+		for i := range dvo.VPCs {
+			if *dvo.VPCs[i].CIDRBlock == config.VPC {
+				config.VPCID = *dvo.VPCs[i].VPCID
+			}
+		}
+
+		if config.VPCID == "" {
+			fmt.Println("No VPC found, so not removing VPC or dependencies.")
+			return
+		}
+
+
+		// destroy security groups associated with VPC
+		secgroups := getSecurityGroupIDsByVPC(svc, config.VPCID)
+		for i := range secgroups {
+			dsgi := &ec2.DeleteSecurityGroupInput{ GroupID: secgroups[i] }
+			_, err := svc.DeleteSecurityGroup(dsgi)
+			if err != nil {
+				fmt.Println("Error deleting security group:", err)
+			} else {
+				fmt.Println("Delete security group:", secgroups[i])
+			}
+		}
+
+		// deactivate and destroy gateways associated with VPC
+		gatewayids,err := getGatewayIDs(svc, config.VPCID)
+		if err != nil {
+			fmt.Println("Error fetching gateway list:", err)
+		}
+		for i := range gatewayids {
+			digi := &ec2.DetachInternetGatewayInput{ InternetGatewayID: &gatewayids[i], VPCID: &config.VPCID }
+			_,err := svc.DetachInternetGateway(digi)
+			if err != nil {
+				fmt.Println("Failed to detach internet gateway:", err)
+			}
+
+			deigi := &ec2.DeleteInternetGatewayInput{ InternetGatewayID: &gatewayids[i] }
+			_,err = svc.DeleteInternetGateway(deigi)
+			if err != nil {
+				fmt.Println("Failed to delete internet gateway:", gatewayids[i])
+			}
+			
+
+
+		}
+		// wait a bit for aws to settle...
+		fmt.Println("All instances, security groups, gateways destroyed, resting a bit and removing route tables, subnets and VPC...")
+		time.Sleep(30*time.Second)
+
+		// destroy route tables associated with VPC
+		filters := make([]*ec2.Filter,0)
+		keyname := "vpc-id"
+		filter := ec2.Filter{
+			Name: &keyname, Values: []*string{ &config.VPCID } }
+		filters = append(filters,&filter)
+
+		rti := &ec2.DescribeRouteTablesInput{ Filters: filters }
+		rttables, err := svc.DescribeRouteTables(rti)
+		if err != nil {
+			fmt.Println("Error describing route table associated with VPC:", err)
+		}
+
+		for i := range rttables.RouteTables {
+			drti := &ec2.DeleteRouteTableInput{ RouteTableID: rttables.RouteTables[i].RouteTableID }
+			_,err = svc.DeleteRouteTable(drti)
+			if err != nil {
+				fmt.Println("Failed to delete route table:", err)
+			}
+		}
+
+
+		// destroy subnets associated with VPC
+		filters = make([]*ec2.Filter,0)
+		keyname = "vpc-id"
+		filter = ec2.Filter{
+			Name: &keyname, Values: []*string{ &config.VPCID } }
+		filters = append(filters,&filter)
+		dsi := &ec2.DescribeSubnetsInput{ Filters: filters }
+		subnets,err := svc.DescribeSubnets(dsi)
+		if err != nil {
+			fmt.Println("Error describing subnets associated with VPC:", err)
+		}
+
+		for i := range subnets.Subnets {
+			desi := &ec2.DeleteSubnetInput{ SubnetID: subnets.Subnets[i].SubnetID }
+			_,err = svc.DeleteSubnet(desi)
+			if err != nil {
+				fmt.Println("Failed to delete subnet:", err)
+			}
+		}
+
+		devi := &ec2.DeleteVPCInput{ VPCID: &config.VPCID }
+		_,err = svc.DeleteVPC(devi)
+
+		if err != nil {
+			fmt.Println("Error deleting vpc: ", err)
+		}
+	} else {
+		fmt.Println("Everything but RDS and VPC destroyed.")
 	}
-
-
-
-
-
-	fmt.Println("All instances destroyed, resting a bit and removing VPC...")
-	time.Sleep(5*time.Second)
-	devi := &ec2.DeleteVPCInput{ VPCID: &config.VPCID }
-	_,err = svc.DeleteVPC(devi)
-
-	if err != nil {
-		fmt.Println("Error deleting vpc: ", err)
-	}
-	*/
 
 }
 

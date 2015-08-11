@@ -55,6 +55,19 @@ The configuration file is designed to contain the minimum amount of information 
 	* hasexternalip: if set to true, the instance will be given an external ip (optional)
 	* isnat: if set to true, the instance will have traffic routed to it in order to NAT for other instances (optional)
 	* initialconfig: an overload to use a specific initialconfig template rather than the global one (optional)
+* rds: an array of rds definitions
+	* dbinstanceidentifier: the name of the RDS instance
+	* dbname: the default DB name, if applicable
+	* engine: string representing the engine, see AWS docs. e.g., "MySQL"
+	* dbinstanceclass: instance class of the RDS instance, e.g., "db.t1.micro"
+	* masterusername: admin DB user
+	* masteruserpassword: admin user password
+* elb: an array of elb definition
+	* name: name of elb
+	* instanceport: port the instance is listening on, assumed to be the LB port
+	* protocol: "HTTP" or "HTTPS"
+	* securitygroups: array of security groups for the LB that must match the name of the 'allsecuritygroups' array
+	* instances: array of instance names to be included in the LB
 
 
 
@@ -62,22 +75,25 @@ Example
 -------
 <pre>
 $ ./saws -a create
+Created new VPC: vpc-55e50c31
 Created MySQL RDS instance:  someid
-Created instance salt: i-1b2e52b3
-Created instance debiantest1: i-cd2e141e
-Created instance debiantest2: i-462e1495
-Created instance wintest1: i-af2e5207
-Waiting for remaining 4 creation steps to complete...
-1: External IP for salt assigned: 52.2.47.184
+Created instance salt: i-78b868d3
+Created instance debiantest1: i-8ab96921
+Created instance debiantest2: i-a1ba6a0a
+Created instance wintest1: i-9f5bda4d
+Created elb: testlb-757772391.us-east-1.elb.amazonaws.com
+Waiting for remaining 5 creation steps to complete...
+1: External IP for salt assigned: 52.20.50.167
 2: Configured for NAT: salt
-3: External IP for wintest1 assigned: 52.2.7.39
-4: Endpoint for RDS instance someid: someid.cqxtcggij89r.us-east-1.rds.amazonaws.com
-$ ssh -i ../tor-cloud-servers.pem admin@52.2.47.184
-The authenticity of host '52.2.47.184 (52.2.47.184)' can't be established.
-ECDSA key fingerprint is d4:09:7c:60:95:9d:94:57:a2:7b:fb:87:76:3c:ba:ee.
+3: External IP for debiantest1 assigned: 52.2.9.93
+4: External IP for debiantest2 assigned: 52.20.120.19
+5: Endpoint for RDS instance someid: someid.cqxtcggij89r.us-east-1.rds.amazonaws.com
+$ ssh -i ../tor-cloud-servers.pem admin@52.20.50.167
+The authenticity of host '52.20.50.167 (52.20.50.167)' can't be established.
+ECDSA key fingerprint is ae:82:cb:bf:94:85:1b:dd:b8:bc:f2:4f:cb:01:b1:d7.
 Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '52.2.47.184' (ECDSA) to the list of known hosts.
-Linux ip-192-168-98-147 3.2.0-4-amd64 #1 SMP Debian 3.2.65-1+deb7u1 x86_64
+Warning: Permanently added '52.20.50.167' (ECDSA) to the list of known hosts.
+Linux ip-192-168-98-226 3.2.0-4-amd64 #1 SMP Debian 3.2.65-1+deb7u1 x86_64
 The programs included with the Debian GNU/Linux system are free software;
 the exact distribution terms for each program are described in the
 individual files in /usr/share/doc/*/copyright.
@@ -98,14 +114,26 @@ wintest1:
     ----------
     os:
         Windows
-debiantest1:
-    ----------
-    os:
-        Debian
 debiantest2:
     ----------
     os:
         Debian
+debiantest1:
+    ----------
+    os:
+        Debian
+root@salt:/home/admin# exit
+admin@salt:~$ logout
+Connection to 52.20.50.167 closed.
+$ curl testlb-757772391.us-east-1.elb.amazonaws.com
+<html>
+<head>
+<title>Welcome to nginx!</title>
+</head>
+<body bgcolor="white" text="black">
+<center><h1>Welcome to nginx!</h1></center>
+</body>
+</html>
 </pre>
 
 
