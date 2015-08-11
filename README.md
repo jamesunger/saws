@@ -126,14 +126,14 @@ root@salt:/home/admin# exit
 admin@salt:~$ logout
 Connection to 52.20.50.167 closed.
 $ curl testlb-757772391.us-east-1.elb.amazonaws.com
-<html>
-<head>
-<title>Welcome to nginx!</title>
-</head>
-<body bgcolor="white" text="black">
-<center><h1>Welcome to nginx!</h1></center>
-</body>
-</html>
+&lt;html&gt;
+&lt;head&gt;
+&lt;title&gt;Welcome to nginx!&lt;/title&gt;&gt;
+&lt;/head&gt;
+&lt;body bgcolor="white" text="black"&gt;
+&lt;center>&lt;h1&gt;Welcome to nginx!&lt;/h1&gt;&lt;/center&gt;
+&lt;/body>
+&lt;/html>
 </pre>
 
 
