@@ -88,6 +88,11 @@ Waiting for remaining 5 creation steps to complete...
 3: External IP for debiantest1 assigned: 52.2.9.93
 4: External IP for debiantest2 assigned: 52.20.120.19
 5: Endpoint for RDS instance someid: someid.cqxtcggij89r.us-east-1.rds.amazonaws.com
+</pre>
+
+Now we can login to the salt host and verify Salt is working and accept the minion keys.
+
+<pre>
 $ ssh -i ../tor-cloud-servers.pem admin@52.20.50.167
 The authenticity of host '52.20.50.167 (52.20.50.167)' can't be established.
 ECDSA key fingerprint is ae:82:cb:bf:94:85:1b:dd:b8:bc:f2:4f:cb:01:b1:d7.
@@ -122,9 +127,11 @@ debiantest1:
     ----------
     os:
         Debian
-root@salt:/home/admin# exit
-admin@salt:~$ logout
-Connection to 52.20.50.167 closed.
+</pre>
+
+And lets verify the LB is up and running.
+
+<pre>
 $ curl testlb-757772391.us-east-1.elb.amazonaws.com
 &lt;html&gt;
 &lt;head&gt;
