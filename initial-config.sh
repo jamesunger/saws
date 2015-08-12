@@ -3,6 +3,12 @@
 echo SAWS_HOSTNAME >/etc/hostname
 hostname SAWS_HOSTNAME
 
+# setup NAT immediately if we are salt 
+if [[ "SAWS_HOSTNAME" == "salt" ]]; then
+	echo "1" >/proc/sys/net/ipv4/ip_forward
+	iptables -t nat -I POSTROUTING -s SAWS_VPC -d 0.0.0.0/0 -j MASQUERADE
+fi
+
 # sleep 30 seconds to give everything some time to settle...
 sleep 30
 
@@ -34,8 +40,6 @@ perl /root/saws-package/gen-hosts.pl
 
 ## install salt
 if [[ "SAWS_HOSTNAME" == "salt" ]]; then
-	echo "1" >/proc/sys/net/ipv4/ip_forward
-	iptables -t nat -I POSTROUTING -s SAWS_VPC -d 0.0.0.0/0 -j MASQUERADE
 	echo "iptables -t nat -I POSTROUTING -s SAWS_VPC -d 0.0.0.0/0 -j MASQUERADE" >>/etc/rc.local
 	echo "echo \"1\" >/proc/sys/net/ipv4/ip_forward" >>/etc/rc.local
         apt-get -y --force-yes install salt-master

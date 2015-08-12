@@ -1,5 +1,24 @@
 package main
 
+
+/*
+*
+* Copyright 2015 James Unger
+*
+* This program is free software: you can redistribute it and/or modify
+*    it under the terms of the GNU General Public License as published by
+*    the Free Software Foundation, either version 3 of the License, or
+*    (at your option) any later version.
+*
+*    This program is distributed in the hope that it will be useful,
+*    but WITHOUT ANY WARRANTY; without even the implied warranty of
+*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+*    GNU General Public License for more details.
+*
+*    You should have received a copy of the GNU General Public License
+*    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 import (
 	"archive/zip"
 	"encoding/json"
@@ -312,6 +331,34 @@ func waitForRDSEndpoint(rds *rds.RDS, dbid *string) (*rds.DBInstance, error) {
 	return nil,errors.New("Waited too long for RDS endpoint to come online.")
 }
 
+func waitForDeleteRDS(rds *rds.RDS, dbid *string) (error) {
+	count := 0
+	_,err := getRDSInstanceById(rds,dbid)
+	if err != nil {
+		return nil
+	}
+
+	for {
+		if count > 300 {
+			break
+		}
+		//fmt.Println(rdsinst)
+		_,err = getRDSInstanceById(rds,dbid)
+
+		if err != nil {
+			return nil
+		} else {
+			count++
+		}
+		time.Sleep(5*time.Second)
+
+	}
+
+	return errors.New("Waited too long for RDS endpoint to delete.")
+}
+
+
+
 func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 	iids := []*string{ instanceid }
 	dii := &ec2.DescribeInstancesInput {
@@ -352,6 +399,17 @@ func waitForNonPendingState(svc *ec2.EC2, instanceid *string) error {
 
 }
 
+func isEc2PartofLb(config *Config, ec2 EC2) bool {
+	for i := range config.ELB {
+		for k := range config.ELB[i].Instances {
+			if config.ELB[i].Instances[k] == ec2.Name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string, doneChan chan string) int {
 	var min int64
 	var max int64
@@ -367,6 +425,14 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 	} else {
 		subnet = config.PrivateSubnetID
 	}
+
+
+	//fmt.Println("Public: ", config.PublicSubnetID)
+	//fmt.Println("Private: ", config.PrivateSubnetID)
+	//fmt.Println("Using: ", subnet)
+	//if isEc2PartofLb(config, ec2config) {
+	//	subnet = config.PrivateSubnetID
+	//}
 
 	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, ec2config.SecurityGroups)
 	params := &ec2.RunInstancesInput{
@@ -1267,6 +1333,9 @@ func Destroy(config *Config) {
 	elbc := elb.New(nil)
 	rdsc := rds.New(nil)
 
+	doneChan := make(chan string)
+	numStepsDeferred := 0
+
 	for i := range config.EC2 {
 		fmt.Println("Destroying EC2 instance:", config.EC2[i].Name)
 		//fmt.Println(config.EC2[i].InstanceType)
@@ -1312,17 +1381,27 @@ func Destroy(config *Config) {
 			}
 			//fmt.Println(ddbo)
 
+			numStepsDeferred++
+			go func() {
+				err := waitForDeleteRDS(rdsc,&config.RDS[i].DBInstanceIdentifier)
+				if err != nil {
+					fmt.Println(err)
+					doneChan <- fmt.Sprint(err)
+				} else {
+
+					groupname := "sawsdbprivate"
+					ddbsgi := &rds.DeleteDBSubnetGroupInput{ DBSubnetGroupName: &groupname }
+					_,err = rdsc.DeleteDBSubnetGroup(ddbsgi)
+					if err != nil {
+						fmt.Println("Failed to delete db subnetgroup:", err)
+					}
 
 
-			groupname := "sawsdbprivate"
-			ddbsgi := &rds.DeleteDBSubnetGroupInput{ DBSubnetGroupName: &groupname }
-			_,err = rdsc.DeleteDBSubnetGroup(ddbsgi)
-			if err != nil {
-				fmt.Println("Failed to delete db subnetgroup:", err)
-			}
+					doneChan <- fmt.Sprintf("Destroyed %s RDS instance: %s", config.RDS[i].Engine, config.RDS[i].DBInstanceIdentifier)
+				}
+			}()
 
 
-			fmt.Println("Destroyed", config.RDS[i].Engine, "RDS instance: ", config.RDS[i].DBInstanceIdentifier)
 		}
 	
 	}
@@ -1337,6 +1416,15 @@ func Destroy(config *Config) {
 		}
 	}
 
+
+	if numStepsDeferred != 0 {
+		fmt.Println("Waiting for remaining", numStepsDeferred, "destroy steps to complete...")
+		for i := 0; i < numStepsDeferred; i++ {
+			msg := <- doneChan
+			next := i + 1
+			fmt.Printf("%d: %s\n", next, msg)
+		}
+	}
 
 	if config.DestroyPolicy == "nuke" {
 		dvi := &ec2.DescribeVPCsInput{}
@@ -1366,7 +1454,7 @@ func Destroy(config *Config) {
 			if err != nil {
 				fmt.Println("Error deleting security group:", err)
 			} else {
-				fmt.Println("Delete security group:", secgroups[i])
+				fmt.Println("Delete security group:", *secgroups[i])
 			}
 		}
 
@@ -1392,35 +1480,14 @@ func Destroy(config *Config) {
 
 		}
 		// wait a bit for aws to settle...
-		fmt.Println("All instances, security groups, gateways destroyed, resting a bit and removing route tables, subnets and VPC...")
-		time.Sleep(30*time.Second)
-
-		// destroy route tables associated with VPC
-		filters := make([]*ec2.Filter,0)
-		keyname := "vpc-id"
-		filter := ec2.Filter{
-			Name: &keyname, Values: []*string{ &config.VPCID } }
-		filters = append(filters,&filter)
-
-		rti := &ec2.DescribeRouteTablesInput{ Filters: filters }
-		rttables, err := svc.DescribeRouteTables(rti)
-		if err != nil {
-			fmt.Println("Error describing route table associated with VPC:", err)
-		}
-
-		for i := range rttables.RouteTables {
-			drti := &ec2.DeleteRouteTableInput{ RouteTableID: rttables.RouteTables[i].RouteTableID }
-			_,err = svc.DeleteRouteTable(drti)
-			if err != nil {
-				fmt.Println("Failed to delete route table:", err)
-			}
-		}
+		//fmt.Println("All instances, security groups, gateways destroyed, resting a bit and removing route tables, subnets and VPC...")
+		//time.Sleep(60*time.Second)
 
 
 		// destroy subnets associated with VPC
-		filters = make([]*ec2.Filter,0)
-		keyname = "vpc-id"
-		filter = ec2.Filter{
+		filters := make([]*ec2.Filter,0)
+		keyname := "vpc-id"
+		filter := ec2.Filter{
 			Name: &keyname, Values: []*string{ &config.VPCID } }
 		filters = append(filters,&filter)
 		dsi := &ec2.DescribeSubnetsInput{ Filters: filters }
@@ -1436,6 +1503,35 @@ func Destroy(config *Config) {
 				fmt.Println("Failed to delete subnet:", err)
 			}
 		}
+
+
+
+
+		// destroy route tables associated with VPC
+		filters = make([]*ec2.Filter,0)
+		keyname = "vpc-id"
+		filter = ec2.Filter{
+			Name: &keyname, Values: []*string{ &config.VPCID } }
+		filters = append(filters,&filter)
+
+		rti := &ec2.DescribeRouteTablesInput{ Filters: filters }
+		rttables, err := svc.DescribeRouteTables(rti)
+		if err != nil {
+			fmt.Println("Error describing route table associated with VPC:", err)
+		}
+
+		for i := range rttables.RouteTables {
+			drti := &ec2.DeleteRouteTableInput{ RouteTableID: rttables.RouteTables[i].RouteTableID }
+			_,err = svc.DeleteRouteTable(drti)
+			if err != nil {
+				//fmt.Println("Failed to delete route table:", err)
+			}
+		}
+
+
+
+
+
 
 		devi := &ec2.DeleteVPCInput{ VPCID: &config.VPCID }
 		_,err = svc.DeleteVPC(devi)
@@ -1530,12 +1626,17 @@ func copyContents(r io.Reader, w io.Writer) error {
 	return nil
 }
 
-func unwantedFileOrObject(info os.FileInfo) bool {
+func unwantedFileOrObject(path string, info os.FileInfo) bool {
 	//fmt.Println(info.Name())
-	unwanted := []string{"src", "pkg", "saws", "saws.json", "package.zip"}
+	unwanted := []string{".git", "src", "pkg", "saws", "saws.json", "package.zip"}
 	for i := range unwanted {
-		if info.Name() == unwanted[i] {
-			fmt.Println("Do not want: ", info.Name())
+		//fmt.Println(path)
+		match,err := regexp.MatchString(unwanted[i] + "*", path)
+		if err != nil {
+			panic(err)
+		}
+		if match {
+			//fmt.Println("Do not want: ", path)
 			return true
 		}
 	}
@@ -1558,7 +1659,7 @@ func zipEverything() error {
 			return err
 		}
 
-		if unwantedFileOrObject(info) {
+		if unwantedFileOrObject(path,info) {
 			return nil
 		}
 

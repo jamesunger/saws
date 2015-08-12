@@ -33,7 +33,6 @@
          "name" : "debiantest1",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
@@ -41,7 +40,6 @@
          "name" : "debiantest2",
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
-	 "hasexternalip" : true,
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
