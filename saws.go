@@ -259,6 +259,137 @@ func Push(config *Config) {
 	uploadPackage(config)
 }
 
+
+
+func waitForNoUsedIPS(svc *ec2.EC2, vpcid string) error {
+	filters := make([]*ec2.Filter,0)
+	keyname := "vpc-id"
+	filter := ec2.Filter{
+		Name: &keyname, Values: []*string{ &vpcid } }
+	filters = append(filters,&filter)
+	dnii := &ec2.DescribeNetworkInterfacesInput{ Filters: filters }
+	dnio,err := svc.DescribeNetworkInterfaces(dnii)
+	if err != nil {
+		fmt.Println("Failed to describe network interfaces:",err)
+		return err
+	}
+
+	//for i := range dnio.NetworkInterfaces {
+	//	fmt.Println(dnio.NetworkInterfaces[i])
+	//}
+
+	count := 0
+	for {
+		dnio,err = svc.DescribeNetworkInterfaces(dnii)
+		if len(dnio.NetworkInterfaces) == 0 {
+			return nil
+		}
+
+		//for i := range dnio.NetworkInterfaces {
+		//	fmt.Println(dnio.NetworkInterfaces[i])
+		//}
+
+		if count > 60 {
+			break
+		}
+
+		time.Sleep(2*time.Second)
+		count++
+
+	}
+
+	return errors.New("Waited too long for IPs to disappear...")
+
+}
+
+func waitForDetachedNetwork(svc *ec2.EC2, instanceid *string) error {
+	iids := []*string{ instanceid }
+	dii := &ec2.DescribeInstancesInput {
+		InstanceIDs: iids,
+	}
+
+	dio,err := svc.DescribeInstances(dii)
+	if err != nil {
+		panic(err)
+	}
+
+
+	//fmt.Println(dio)
+	count := 0
+	for {
+		dio,err = svc.DescribeInstances(dii)
+		if err != nil {
+			panic(err)
+		}
+
+		if len(dio.Reservations[0].Instances[0].NetworkInterfaces) == 0 {
+			return nil
+		}
+
+		if count > 60 {
+			break
+		}
+
+		time.Sleep(2*time.Second)
+		count++
+	}
+
+
+	return errors.New(fmt.Sprintf("Waited too long for EC2 to remove networking."))
+
+
+}
+
+
+
+func waitForXState(svc *ec2.EC2, instanceid *string, state string) error {
+	iids := []*string{ instanceid }
+	dii := &ec2.DescribeInstancesInput {
+		InstanceIDs: iids,
+	}
+
+	dio,err := svc.DescribeInstances(dii)
+	if err != nil {
+		panic(err)
+	}
+
+
+	//fmt.Println("waiting for instance to leave state", state)
+	//fmt.Println(dio)
+	count := 0
+	for {
+		dio,err = svc.DescribeInstances(dii)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Println(dio)
+
+		if *dio.Reservations[0].Instances[0].State.Name == state {
+			return nil
+		}
+
+		if count > 30 {
+			break
+		}
+
+		time.Sleep(2*time.Second)
+		count++
+		//fmt.Println(dio)
+		//fmt.Println("waiting for instance to leave state ", state)
+	}
+
+
+	return errors.New(fmt.Sprintf("Waited too long waiting for EC2 to enter %s state",state))
+
+
+}
+
+
+
+
+
+
+
 func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 	iids := []*string{ instanceid }
 	dii := &ec2.DescribeInstancesInput {
@@ -284,7 +415,7 @@ func waitForNonXState(svc *ec2.EC2, instanceid *string, state string) error {
 			return nil
 		}
 
-		if count > 20 {
+		if count > 30 {
 			break
 		}
 
@@ -330,6 +461,11 @@ func waitForRDSEndpoint(rds *rds.RDS, dbid *string) (*rds.DBInstance, error) {
 
 	return nil,errors.New("Waited too long for RDS endpoint to come online.")
 }
+
+
+
+
+
 
 func waitForDeleteRDS(rds *rds.RDS, dbid *string) (error) {
 	count := 0
@@ -1247,7 +1383,8 @@ func Create(config *Config) {
 		//fmt.Println("instanceport ", config.ELB[i].InstancePort)
 		secgroupids := getSecurityGroupIDs(svc, config, config.ELB[i].SecurityGroups)
 		listn := &elb.Listener{InstancePort: &config.ELB[i].InstancePort, InstanceProtocol: &config.ELB[i].Protocol, Protocol: &config.ELB[i].Protocol, LoadBalancerPort: &config.ELB[i].InstancePort}
-		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PublicSubnetID, &config.PrivateSubnetID }, SecurityGroups: secgroupids }
+		//clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PublicSubnetID, &config.PrivateSubnetID }, SecurityGroups: secgroupids }
+		clbi := &elb.CreateLoadBalancerInput{Listeners: []*elb.Listener{ listn }, LoadBalancerName: &config.ELB[i].Name, Subnets: []*string{ &config.PublicSubnetID }, SecurityGroups: secgroupids }
 		clbo, err := elbc.CreateLoadBalancer(clbi)
 		if err != nil {
 			fmt.Println("Failed to create elb:", err)
@@ -1363,8 +1500,18 @@ func Destroy(config *Config) {
 					panic(err)
 				}
 
-
-				fmt.Println("Terminated instance", *instances[k].InstanceID)
+				numStepsDeferred++
+				go func() {
+					//err := waitForDetachedNetwork(svc,instances[k].InstanceID)
+					err := waitForXState(svc,instances[k].InstanceID, "terminated")
+					if err != nil {
+						fmt.Println(err)
+						doneChan <- fmt.Sprint(err)
+					} else {
+						//time.Sleep(20*time.Second)
+						doneChan <- fmt.Sprintf("Terminated instance: %s", *instances[k].InstanceID)
+					}
+				}()
 
 			}
 		}
@@ -1426,6 +1573,8 @@ func Destroy(config *Config) {
 		}
 	}
 
+
+
 	if config.DestroyPolicy == "nuke" {
 		dvi := &ec2.DescribeVPCsInput{}
 		dvo,err := svc.DescribeVPCs(dvi)
@@ -1445,6 +1594,12 @@ func Destroy(config *Config) {
 			return
 		}
 
+		// before we mess with gateways and security groups, lets make sure all attached addresses are gone. they should really all be gone at this point, but it takes a bit sometimes...
+		fmt.Println("Waiting for IPs to be free from VPCs/Subnets...")
+		err = waitForNoUsedIPS(svc, config.VPCID)
+		if err != nil {
+			fmt.Println(err)
+		}
 
 		// destroy security groups associated with VPC
 		secgroups := getSecurityGroupIDsByVPC(svc, config.VPCID)
@@ -1457,6 +1612,8 @@ func Destroy(config *Config) {
 				fmt.Println("Delete security group:", *secgroups[i])
 			}
 		}
+
+
 
 		// deactivate and destroy gateways associated with VPC
 		gatewayids,err := getGatewayIDs(svc, config.VPCID)
@@ -1539,6 +1696,7 @@ func Destroy(config *Config) {
 		if err != nil {
 			fmt.Println("Error deleting vpc: ", err)
 		}
+		fmt.Println("Destroyed VPC:", config.VPCID)
 	} else {
 		fmt.Println("Everything but RDS and VPC destroyed.")
 	}

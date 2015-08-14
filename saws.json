@@ -31,6 +31,7 @@
       {
          "instancetype" : "t1.micro",
          "name" : "debiantest1",
+	 "hasexternalip" : true,
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh", "http" ]
@@ -38,6 +39,7 @@
       {
          "instancetype" : "t1.micro",
          "name" : "debiantest2",
+	 "hasexternalip" : true,
          "ami" : "ami-baeda9d2",
          "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh", "http" ]
@@ -52,23 +54,24 @@
       }
    ],
   "rds" : [
-	{
-		"dbname": "testmysql",
-		"engine": "MySQL",
-		"dbinstanceidentifier": "someid",
-		"allocatedstorage": 5,
-		"dbinstanceclass": "db.t1.micro",
-		"masterusername": "mysqlroot",
-		"masteruserpassword": "ibai3ah85"
-	}
+        {
+                "dbname": "testmysql",
+                "engine": "MySQL",
+                "dbinstanceidentifier": "someid",
+                "allocatedstorage": 5,
+                "dbinstanceclass": "db.t1.micro",
+                "masterusername": "mysqlroot",
+                "masteruserpassword": "ibai3ah85"
+        }
    ],
+
 
   "elb" : [
 	{
 	  "name": "testlb",
 	  "instanceport": 80,
 	  "protocol": "HTTP",
-	  "securitygroups" : [ "default", "http" ],
+	  "securitygroups" : [ "default" ],
           "instances" : [
 		"debiantest1",
 		"debiantest2"

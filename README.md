@@ -12,6 +12,20 @@ environments.
 
 NOTE: This is a very, very early WIP. I wouldn't use it for anything. :)
 
+Motivation
+----------
+
+I needed a simple AWS bootstrap tool that meets the following criteria:
+1. All CM materials housed in a git/hg/svn repo, pushed to and deployed from S3.
+2. Facilitate immutable infrastructure without relying on AMIs or baked images.
+3. Simple configuration file that controls destruction/creation of AWS resources.
+4. Cross platform (windows/linux).
+5. Less configuration is more, specify only what you need. Assume sane defaults for as much as possible. Further configuration should be handled downstream in scripts, anyway.
+
+
+Synopsis
+--------
+
 A JSON config file provides EC2 and other service information.
 
 Commands available:
