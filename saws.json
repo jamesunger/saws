@@ -7,6 +7,7 @@
    "availzone1" : "us-east-1c",
    "availzone2" : "us-east-1d",
    "destroypolicy" : "nuke",
+   "keypair" : "dummykey",
    "allsecuritygroups" : [ {
 			"name": "ssh",
 			"tcpport": 22
@@ -23,7 +24,6 @@
          "instancetype" : "t1.micro",
          "name" : "salt",
          "ami" : "ami-baeda9d2",
-         "keyname" : "tor-cloud-servers",
 	 "hasexternalip" : true,
 	 "isnat" : true,
 	 "securitygroups" : [ "default", "ssh" ]
@@ -33,7 +33,6 @@
          "name" : "debiantest1",
 	 "hasexternalip" : true,
          "ami" : "ami-baeda9d2",
-         "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
@@ -41,14 +40,12 @@
          "name" : "debiantest2",
 	 "hasexternalip" : true,
          "ami" : "ami-baeda9d2",
-         "keyname" : "tor-cloud-servers",
 	 "securitygroups" : [ "default", "ssh", "http" ]
       },
       {
          "instancetype" : "t2.micro",
          "name" : "wintest1",
          "ami" : "ami-850adbee",
-         "keyname" : "tor-cloud-servers",
 	 "initialconfig" : "initial-config.ps1",
 	 "securitygroups" : [ "default", "rdp" ]
       }
@@ -71,7 +68,7 @@
 	  "name": "testlb",
 	  "instanceport": 80,
 	  "protocol": "HTTP",
-	  "securitygroups" : [ "default" ],
+	  "securitygroups" : [ "default", "http" ],
           "instances" : [
 		"debiantest1",
 		"debiantest2"

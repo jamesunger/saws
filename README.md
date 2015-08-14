@@ -86,41 +86,47 @@ The configuration file is designed to contain the minimum amount of information 
 
 
 
-Example
+Example Usage
 -------
+
+The demo saws.json creates three Debian GNU/Linux instances and a Windows 2012 instance. It also create a basic load balancer and a MySQL RDS DB. The base scripts provided will bootstrap salt on each node and expose nginx to test the LB on the two Debian hosts.
+
+First, set the following vars in your shell for the AWS lib to work: AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_DEFAULT_REGION, AWS_ACCESS_KEY_ID.
+
 <pre>
 $ ./saws -a create
-Created new VPC: vpc-55e50c31
+Created keypair: dummykey
+Key saved to file: dummykey.key
+Created new VPC: vpc-89b953ed
 Created MySQL RDS instance:  someid
-Created instance salt: i-78b868d3
-Created instance debiantest1: i-8ab96921
-Created instance debiantest2: i-a1ba6a0a
-Created instance wintest1: i-9f5bda4d
-Created elb: testlb-757772391.us-east-1.elb.amazonaws.com
+Created instance salt: i-24bd088f
+Created instance debiantest1: i-d1bc097a
+Created instance debiantest2: i-4cbc09e7
+Created instance wintest1: i-3122bae3
+Created elb: testlb-1869659592.us-east-1.elb.amazonaws.com
 Waiting for remaining 5 creation steps to complete...
-1: External IP for salt assigned: 52.20.50.167
+1: External IP for salt assigned: 52.21.104.223
 2: Configured for NAT: salt
-3: External IP for debiantest1 assigned: 52.2.9.93
-4: External IP for debiantest2 assigned: 52.20.120.19
+3: External IP for debiantest2 assigned: 52.7.38.215
+4: External IP for debiantest1 assigned: 52.21.105.3
 5: Endpoint for RDS instance someid: someid.cqxtcggij89r.us-east-1.rds.amazonaws.com
 </pre>
 
 Now we can login to the salt host and verify Salt is working and accept the minion keys.
 
 <pre>
-$ ssh -i ../tor-cloud-servers.pem admin@52.20.50.167
-The authenticity of host '52.20.50.167 (52.20.50.167)' can't be established.
-ECDSA key fingerprint is ae:82:cb:bf:94:85:1b:dd:b8:bc:f2:4f:cb:01:b1:d7.
+$ ssh -i dummykey.key admin@52.21.104.223
+The authenticity of host '52.21.104.223 (52.21.104.223)' can't be established.
+ECDSA key fingerprint is 4f:e8:b5:17:29:2d:ae:66:10:2f:b3:da:94:ee:33:6f.
 Are you sure you want to continue connecting (yes/no)? yes
-Warning: Permanently added '52.20.50.167' (ECDSA) to the list of known hosts.
-Linux ip-192-168-98-226 3.2.0-4-amd64 #1 SMP Debian 3.2.65-1+deb7u1 x86_64
+Warning: Permanently added '52.21.104.223' (ECDSA) to the list of known hosts.
+Linux ip-192-168-98-201 3.2.0-4-amd64 #1 SMP Debian 3.2.65-1+deb7u1 x86_64
 The programs included with the Debian GNU/Linux system are free software;
 the exact distribution terms for each program are described in the
 individual files in /usr/share/doc/*/copyright.
 Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
 permitted by applicable law.
-admin@salt:~$ sudo su
-root@salt:/home/admin# salt-key -A -y
+admin@salt:~$ sudo salt-key -A -y                                                       
 The following keys are going to be accepted:
 Unaccepted Keys:
 debiantest1
@@ -129,25 +135,26 @@ wintest1
 Key for minion debiantest1 accepted.
 Key for minion debiantest2 accepted.
 Key for minion wintest1 accepted.
-root@salt:/home/admin# salt '*' grains.item os
+admin@salt:~$ sudo salt '*' grains.item os
 wintest1:
     ----------
     os:
         Windows
-debiantest2:
-    ----------
-    os:
-        Debian
 debiantest1:
     ----------
     os:
         Debian
+debiantest2:
+    ----------
+    os:
+        Debian
+admin@salt:~$ 
 </pre>
 
 And lets verify the LB is up and running.
 
 <pre>
-$ curl testlb-757772391.us-east-1.elb.amazonaws.com
+$ curl testlb-1869659592.us-east-1.elb.amazonaws.com
 &lt;html&gt;
 &lt;head&gt;
 &lt;title&gt;Welcome to nginx!&lt;/title&gt;&gt;

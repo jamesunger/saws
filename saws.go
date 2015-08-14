@@ -43,6 +43,7 @@ import (
 
 type Config struct {
 	S3Bucket string `json:s3bucket`
+	KeyPair string `json:keypair`
 	EC2      []EC2  `json:ec2`
 	InitialConfig     string  `json:initialconfig`
 	VPC string `json:vpc`
@@ -571,12 +572,16 @@ func createInstance(svc *ec2.EC2, config *Config, ec2config EC2, userdata string
 	//}
 
 	ec2config.SecurityGroupIDs = getSecurityGroupIDs(svc, config, ec2config.SecurityGroups)
+	keyname := ec2config.KeyName
+	if keyname == "" {
+		keyname = config.KeyPair
+	}
 	params := &ec2.RunInstancesInput{
 		ImageID:      &ec2config.AMI,
 		InstanceType: &ec2config.InstanceType,
 		MaxCount: &max,
 		MinCount: &min,
-		KeyName: &ec2config.KeyName,
+		KeyName: &keyname,
 		UserData: &userdata,
 		SubnetID: &subnet,
 		SecurityGroupIDs: ec2config.SecurityGroupIDs,
@@ -1262,6 +1267,41 @@ func Create(config *Config) {
 	rdsc := rds.New(nil)
 	elbc := elb.New(nil)
 
+
+
+	if config.KeyPair != "" {
+
+		dkpi := &ec2.DescribeKeyPairsInput{ KeyNames: []*string{ &config.KeyPair } }
+		dkpo,err := svc.DescribeKeyPairs(dkpi)
+		if err != nil {
+			// almost certainly due to keypair already existing
+			//fmt.Println("Failed to describe key pairs:", err)
+		}
+
+		if len(dkpo.KeyPairs) == 0 {
+			ckpi := &ec2.CreateKeyPairInput{ KeyName: &config.KeyPair }
+			ckpo,err := svc.CreateKeyPair(ckpi)
+			if err != nil {
+				fmt.Println("Failed to create keypair:")
+				panic(err)
+			}
+
+
+			fmt.Println("Created keypair:", config.KeyPair)
+			err = ioutil.WriteFile(config.KeyPair + ".key", []byte(*ckpo.KeyMaterial), 0600)
+			if err != nil {
+				fmt.Println("Failed to write to", config.KeyPair + ".key:", err)
+				fmt.Println(*ckpo.KeyMaterial)
+			} else {
+				fmt.Println("Key saved to file:", config.KeyPair + ".key")
+			}
+
+		}
+
+	}
+
+
+
 	err := verifyAndCreateVPC(svc,config)
 	if err != nil {
 		panic(err)
@@ -1786,10 +1826,10 @@ func copyContents(r io.Reader, w io.Writer) error {
 
 func unwantedFileOrObject(path string, info os.FileInfo) bool {
 	//fmt.Println(info.Name())
-	unwanted := []string{".git", "src", "pkg", "saws", "saws.json", "package.zip"}
+	unwanted := []string{".git.*", "src.*", "pkg.*", ".*?\\.key", "saws", "saws.json", "package.zip"}
 	for i := range unwanted {
 		//fmt.Println(path)
-		match,err := regexp.MatchString(unwanted[i] + "*", path)
+		match,err := regexp.MatchString(unwanted[i], path)
 		if err != nil {
 			panic(err)
 		}
@@ -1907,8 +1947,10 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("Created bucket ", config.S3Bucket)
+		fmt.Println("Created bucket", config.S3Bucket)
 	}
+
+
 
 	switch {
 	case action == "pack":
