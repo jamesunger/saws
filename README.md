@@ -16,6 +16,7 @@ Motivation
 ----------
 
 I needed a simple AWS bootstrap tool that meets the following criteria:
+
 1. All CM materials housed in a git/hg/svn repo, pushed to and deployed from S3.
 2. Facilitate immutable infrastructure without relying on AMIs or baked images.
 3. Simple configuration file that controls destruction/creation of AWS resources.
