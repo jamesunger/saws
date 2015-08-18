@@ -4,7 +4,7 @@ Set-ExecutionPolicy Unrestricted -Force
 
 Start-Sleep -s 30
 
-Set-AWSCredentials -AccessKey SAWS_ACCESS_KEY -SecretKey SAWS_SECRET_KEY
+Set-AWSCredentials -AccessKey SAWS_S3_ACCESS_KEY -SecretKey SAWS_S3_SECRET_KEY
 Read-S3Object -BucketName SAWS_S3BUCKET -Key package.zip -File C:\package.zip
 
 $stillfailed = ""

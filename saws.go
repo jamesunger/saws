@@ -114,20 +114,20 @@ func getUserData(initialconfig string, s3bucket string, hostname string, vpc str
 
 
 
-	accid := os.Getenv("AWS_ACCESS_KEY_ID")
-	seck := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	accid := os.Getenv("SAWS_S3_ACCESS_KEY")
+	seck := os.Getenv("SAWS_S3_SECRET_KEY")
 
 	if accid == "" {
-		panic("Error: need to set env var AWS_ACCESS_KEY_ID")
+		panic("Error: need to set env var SAWS_S3_ACCESS_KEY")
 	}
 
 	if seck == "" {
-		panic("Error: need to set env var AWS_SECRET_ACCESS_KEY")
+		panic("Error: need to set env var SAWS_S3_SECRET_KEY")
 	}
 
 
-	rxpid := regexp.MustCompile("SAWS_ACCESS_KEY")
-	rxpkey := regexp.MustCompile("SAWS_SECRET_KEY")
+	rxpid := regexp.MustCompile("SAWS_S3_ACCESS_KEY")
+	rxpkey := regexp.MustCompile("SAWS_S3_SECRET_KEY")
 	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
 	rxphostname := regexp.MustCompile("SAWS_HOSTNAME")
 	rxpvpc := regexp.MustCompile("SAWS_VPC")

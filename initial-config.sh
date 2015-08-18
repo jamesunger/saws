@@ -20,9 +20,9 @@ curl -O https://bootstrap.pypa.io/get-pip.py
 sudo python get-pip.py
 sudo pip install awscli
 
-export AWS_SECRET_ACCESS_KEY=SAWS_SECRET_KEY
+export AWS_SECRET_ACCESS_KEY=SAWS_S3_SECRET_KEY
 export AWS_REGION=us-east-1
-export AWS_ACCESS_KEY_ID=SAWS_ACCESS_KEY
+export AWS_ACCESS_KEY_ID=SAWS_S3_ACCESS_KEY
 
 /usr/local/bin/aws s3 cp s3://SAWS_S3BUCKET/package.zip /root/package.zip
 mkdir /root/saws-package
