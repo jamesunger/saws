@@ -1,0 +1,59 @@
+{
+   "initialconfig": "initial-config.sh",
+   "s3bucket" : "384u7fkfj-wptest",
+   "vpc" : "192.168.97.0/24",
+   "privatenet" : "192.168.97.0/25",
+   "publicnet" : "192.168.97.128/25",
+   "availzone1" : "us-east-1c",
+   "availzone2" : "us-east-1d",
+   "destroypolicy" : "nuke",
+   "keypair" : "wptestkey",
+   "allsecuritygroups" : [ {
+			"name": "ssh",
+			"tcpport": 22
+			},
+			{ "name": "http",
+			  "tcpport": 80
+			}
+			 ],
+   "ec2" : [
+      {
+         "instancetype" : "t1.micro",
+         "name" : "wp1",
+         "ami" : "ami-baeda9d2",
+	 "hasexternalip" : true,
+	 "isnat" : true,
+	 "securitygroups" : [ "default", "ssh" ]
+      },
+      {
+         "instancetype" : "t1.micro",
+         "name" : "wp2",
+	 "hasexternalip" : true,
+         "ami" : "ami-baeda9d2",
+	 "securitygroups" : [ "default", "ssh" ]
+      }
+   ],
+  "rds" : [
+        {
+                "dbname": "wp",
+                "engine": "MySQL",
+                "dbinstanceidentifier": "wptest",
+                "allocatedstorage": 5,
+                "dbinstanceclass": "db.t1.micro",
+                "masterusername": "mysqlroot",
+                "masteruserpassword": "ibai3ah85"
+        }
+   ],
+  "elb" : [
+	{
+	  "name": "testwplb",
+	  "instanceport": 80,
+	  "protocol": "HTTP",
+	  "securitygroups" : [ "default", "http" ],
+          "instances" : [
+		"wp1",
+		"wp2"
+	  ]
+	}
+  ]
+}
