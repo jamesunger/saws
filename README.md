@@ -12,7 +12,7 @@ environments.
 
 NOTE: This is a very, very early WIP. I wouldn't use it for anything. :)
 
-Motivation
+Goals/Motivation
 ----------
 
 I needed a simple AWS bootstrap tool that meets the following criteria:
@@ -55,7 +55,7 @@ The saws.json file defines the VPC and associated AWS services and is the only c
 
 The configuration file is designed to contain the minimum amount of information necessary to determinately recreate an environment. Important JSON configuration params:
 
-* initialconfig: file to use for initial UserData. This file will be templated with key AWS information: SAWS_ACCESSKEY, SAWS_SECRETKEY, SAWS_S3BUCKET, SAWS_HOSTNAME, SAWS_VPC
+* initialconfig: file to use for initial UserData. This file will be templated with key AWS information: SAWS_S3_ACCESSKEY, SAWS_S3_SECRETKEY, SAWS_S3BUCKET, SAWS_HOSTNAME, SAWS_VPC
 * s3bucket: the S3 bucket to store central configuration data. This will be automatically created if it does not exist
 * vpc: the CIDR range of the VPC. This should encompass any private/public subnet CIDR range.
 * privatenet: the CIDR range of the private subnet in the VPC
@@ -86,12 +86,31 @@ The configuration file is designed to contain the minimum amount of information 
 
 
 
-Example Usage
--------
+Installation/Demo
+-----------------
+
+Requires a Go compiler.
+
+<pre>
+$ git clone https://github.com/jamesunger/saws
+$ cd saws
+$ export GOPATH=$PWD
+$ go get github.com/aws/aws-sdk-go/service/ec2
+$ go build saws.go
+</pre>
 
 The demo saws.json creates three Debian GNU/Linux instances and a Windows 2012 instance. It also create a basic load balancer and a MySQL RDS DB. The base scripts provided will bootstrap salt on each node and expose nginx to test the LB on the two Debian hosts.
 
-First, set the following vars in your shell for the AWS lib to work: AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_DEFAULT_REGION, AWS_ACCESS_KEY_ID.
+First, set the following AWS vars in your shell for the AWS lib to work:
+
+* AWS_SECRET_ACCESS_KEY
+* AWS_REGION
+* AWS_DEFAULT_REGION
+* AWS_ACCESS_KEY_ID
+* SAWS_S3_SECRET_KEY
+* SAWS_S3_ACCESS_KEY
+
+SAWS_S3_SECRET_KEY and SAWS_S3_ACCESS_KEY are specific keys for saws and specify the AWS keys instances will use when clients download from S3, so minimal access should be used.
 
 <pre>
 $ ./saws -a create
