@@ -61,11 +61,13 @@ The configuration file is designed to contain the minimum amount of information 
 * privatenet: the CIDR range of the private subnet in the VPC
 * publicnet: the CIDR range of the public subnet in the VPC
 * allsecuritygroups: defines specific security groups. The only options are 'name' and 'tcpport' which affect ingress security group filters.
+* keypair: specify which key to use, if it doesn't exist it will be created
+* destroypolicy: when running destroy, if set to 'nuke', will destroy VPCs and RDS instances. Otherwise, it will only destroy EC2 nodes. This is helpful to persist data and for creation/destruction iteration time.
 * ec2: an array of ec2 definitions
 	* instancetype: AWS instance type
 	* name: name of the EC2 instance, which will be tagged with a Name tag
 	* ami: AMI to use when creating the instance
-	* keyname: the SSH key/value pair used to access the instance
+	* keyname: the SSH key/value pair used to access the instance, option if 'keypair' is specified globally
 	* securitygroups: a list of strings to map into security groups. 'default' is always available but others must match the 'allsecuritygroups' setting
 	* hasexternalip: if set to true, the instance will be given an external ip (optional)
 	* isnat: if set to true, the instance will have traffic routed to it in order to NAT for other instances (optional)
