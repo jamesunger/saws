@@ -30,7 +30,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/elb"
 	"github.com/aws/aws-sdk-go/service/rds"
 	"github.com/aws/aws-sdk-go/service/s3"
+        "github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+        "code.google.com/p/go-uuid/uuid"
 	"io"
 	"io/ioutil"
 	"os"
@@ -38,6 +40,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"os/exec"
 )
 
 type Config struct {
@@ -55,6 +58,8 @@ type Config struct {
 	AllSecurityGroups []SecurityGroup `json:allsecuritygroups`
 	AvailZone1        string          `json:availzone1`
 	AvailZone2        string          `json:availzone2`
+	PushCmd           string          `json:pushcmd`
+	InfoCmd           string          `json:infocmd`
 	RDS               []RDS           `json:rds`
 	ELB               []ELB           `json:elb`
 }
@@ -105,7 +110,7 @@ type SawsInfo struct {
 	RDS []*rds.DBInstance `json:rds`
 }
 
-func getUserData(initialconfig string, s3bucket string, hostname string, vpc string) string {
+func getUserData(initialconfig string, s3bucket string, hostname string, vpc string, uuids string) string {
 	ic, err := ioutil.ReadFile(initialconfig)
 	if err != nil {
 		panic(err)
@@ -127,13 +132,15 @@ func getUserData(initialconfig string, s3bucket string, hostname string, vpc str
 	rxp3 := regexp.MustCompile("SAWS_S3BUCKET")
 	rxphostname := regexp.MustCompile("SAWS_HOSTNAME")
 	rxpvpc := regexp.MustCompile("SAWS_VPC")
+	rxpuuid := regexp.MustCompile("SAWS_UUID")
 	ic1 := rxpid.ReplaceAll(ic, []byte(accid))
 	ic2 := rxpkey.ReplaceAll(ic1, []byte(seck))
 	ic3 := rxp3.ReplaceAll(ic2, []byte(s3bucket))
 	ic4 := rxphostname.ReplaceAll(ic3, []byte(hostname))
 	ic5 := rxpvpc.ReplaceAll(ic4, []byte(vpc))
+	ic6 := rxpuuid.ReplaceAll(ic5, []byte(uuids))
 
-	return base64.StdEncoding.EncodeToString([]byte(ic5))
+	return base64.StdEncoding.EncodeToString([]byte(ic6))
 }
 
 func parseConfig(configfile string) *Config {
@@ -197,7 +204,7 @@ func uploadPackage(config *Config) error {
 	//rlu := &rateLimitUploader{ fh: uploadfile }
 
 	fmt.Println("Uploading package.zip to", config.S3Bucket, "bucket...")
-	uploader := s3manager.NewUploader(nil)
+	uploader := s3manager.NewUploader(session.New())
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Bucket: &config.S3Bucket,
 		Key:    &key,
@@ -218,7 +225,7 @@ func deleteSawsInfo(config *Config) error {
 	key := "saws-info.json"
 	doi := &s3.DeleteObjectInput{Bucket: &config.S3Bucket, Key: &key}
 
-	svc := s3.New(nil)
+	svc := s3.New(session.New())
 	_, err := svc.DeleteObject(doi)
 	//fmt.Println(doo)
 	if err != nil {
@@ -230,28 +237,89 @@ func deleteSawsInfo(config *Config) error {
 
 }
 
-func sendSawsInfo(config *Config) error {
+func getCmd(cmdline string, uuids string) (string,[]string) {
+	parts := strings.Split(cmdline, " ")
+	name := ""
+	args := []string{}
+
+	for i := range parts {
+		if i == 0 {
+			name = parts[0]
+			args = append(args,parts[i])
+		} else if strings.Contains(parts[i],"SAWS_UUID") {
+			narg := strings.Replace(parts[i],"SAWS_UUID",uuids,1)
+			args = append(args,narg)
+		} else {
+			args = append(args,parts[i])
+		}
+	}
+
+	//fmt.Println("name",name,"args",args)
+	return name, args
+}
+
+func sendSawsInfo(config *Config, uuids string) error {
 	jsonBytes := getJsonSawsInfo(config)
 	jsonBytesReader := bytes.NewReader(jsonBytes)
 
-	key := "saws-info.json"
-	uploader := s3manager.NewUploader(nil)
-	_, err := uploader.Upload(&s3manager.UploadInput{
-		Bucket: &config.S3Bucket,
-		Key:    &key,
-		Body:   jsonBytesReader,
-	})
+	if config.InfoCmd != "" {
+		name,cmdargs := getCmd(config.InfoCmd, uuids)
+		cmd := exec.Cmd{Path: name, Args: cmdargs}
+		writcl,err := cmd.StdinPipe()
+		if err != nil {
+			fmt.Println("Error running external infocmd: ", config.InfoCmd);
+			panic(err)
+		}
+		cmd.Start()
 
-	if err != nil {
-		fmt.Println("Failed to upload saws-info.json.")
-		return err
+
+		bytesn,err := io.Copy(writcl,jsonBytesReader)
+		if err != nil {
+			fmt.Println("Failed to read from jsonBytesReader and copy to writcl:",err);
+		} else {
+			fmt.Println(bytesn,"piped to", cmdargs)
+		}
+		err = writcl.Close()
+		if err != nil {
+			fmt.Println("Error failed to close write stream to stdin:",err)
+		}
+
+		err = cmd.Wait()
+		if err != nil {
+			fmt.Println("Subprocess returned error on wait:", err)
+		}
+
+	} else {
+
+		key := "saws-info.json"
+		uploader := s3manager.NewUploader(session.New())
+		_, err := uploader.Upload(&s3manager.UploadInput{
+			Bucket: &config.S3Bucket,
+			Key:    &key,
+			Body:   jsonBytesReader,
+		})
+
+		if err != nil {
+			fmt.Println("Failed to upload saws-info.json.")
+			return err
+		}
 	}
 
 	return nil
 }
 
 func Push(config *Config) {
-	uploadPackage(config)
+	if config.PushCmd != "" {
+		name,cmdargs := getCmd(config.PushCmd,"")
+		cmd := exec.Cmd{Path: name, Args: cmdargs}
+		err := cmd.Run()
+		if err != nil {
+			fmt.Println("Error running external pushcmd:", config.PushCmd);
+			panic(err)
+		}
+	} else {
+		uploadPackage(config)
+	}
 }
 
 func waitForNoUsedIPS(svc *ec2.EC2, vpcid string) error {
@@ -724,8 +792,8 @@ func getRDSInstanceById(rdsc *rds.RDS, rdsid *string) (*rds.DBInstance, error) {
 }
 
 func getJsonSawsInfo(config *Config) []byte {
-	svc := ec2.New(nil)
-	rdsc := rds.New(nil)
+	svc := ec2.New(session.New())
+	rdsc := rds.New(session.New())
 	instancelist := make([]*ec2.Instance, 0)
 	for i := range config.EC2 {
 		//fmt.Println(config.EC2[i].Name)
@@ -1195,9 +1263,10 @@ func verifyAndCreateVPC(c *ec2.EC2, config *Config) error {
 func Create(config *Config) {
 	//fmt.Println("Create not implemented")
 
-	svc := ec2.New(nil)
-	rdsc := rds.New(nil)
-	elbc := elb.New(nil)
+	uuids := uuid.New()
+	svc := ec2.New(session.New())
+	rdsc := rds.New(session.New())
+	elbc := elb.New(session.New())
 
 	if config.KeyPair != "" {
 
@@ -1324,9 +1393,9 @@ func Create(config *Config) {
 			//fmt.Println("No instance found, creating...")
 			var userdata string
 			if config.EC2[i].InitialConfig == "" {
-				userdata = getUserData(config.InitialConfig, config.S3Bucket, config.EC2[i].Name, config.VPC)
+				userdata = getUserData(config.InitialConfig, config.S3Bucket, config.EC2[i].Name, config.VPC, uuids)
 			} else {
-				userdata = getUserData(config.EC2[i].InitialConfig, config.S3Bucket, config.EC2[i].Name, config.VPC)
+				userdata = getUserData(config.EC2[i].InitialConfig, config.S3Bucket, config.EC2[i].Name, config.VPC, uuids)
 			}
 			numsteps := createInstance(svc, config, config.EC2[i], userdata, doneChan)
 			numStepsDeferred += numsteps
@@ -1377,7 +1446,8 @@ func Create(config *Config) {
 		}
 	}
 
-	err = sendSawsInfo(config)
+
+	err = sendSawsInfo(config,uuids)
 	if err != nil {
 		panic(err)
 	}
@@ -1422,9 +1492,9 @@ func releaseExternalIP(svc *ec2.EC2, instanceid string) error {
 
 func Destroy(config *Config) {
 	//fmt.Println("Destroy not implemented")
-	svc := ec2.New(nil)
-	elbc := elb.New(nil)
-	rdsc := rds.New(nil)
+	svc := ec2.New(session.New())
+	elbc := elb.New(session.New())
+	rdsc := rds.New(session.New())
 
 	doneChan := make(chan string)
 	numStepsDeferred := 0
@@ -1639,7 +1709,7 @@ func Destroy(config *Config) {
 }
 
 func Start(config *Config) {
-	svc := ec2.New(nil)
+	svc := ec2.New(session.New())
 
 	for i := range config.EC2 {
 		fmt.Println("Starting ", config.EC2[i].Name)
@@ -1666,7 +1736,7 @@ func Start(config *Config) {
 }
 
 func Stop(config *Config) {
-	svc := ec2.New(nil)
+	svc := ec2.New(session.New())
 
 	for i := range config.EC2 {
 		fmt.Println("Stopping ", config.EC2[i].Name)
@@ -1814,7 +1884,7 @@ func main() {
 
 	config := parseConfig(configfile)
 
-	client := s3.New(nil)
+	client := s3.New(session.New())
 	lb, err := client.ListBuckets(nil)
 	if err != nil {
 		panic(err)
